@@ -126,8 +126,8 @@ precision highp int;
 
 uniform int u_mode;
 uniform float u_alpha_ref;
-uniform vec4 u_fog_vert;
-uniform vec4 u_fog_ram;
+uniform mediump vec4 u_fog_vert;
+uniform mediump vec4 u_fog_ram;
 uniform vec4 u_clip;
 uniform mediump sampler2D s_tex;
 
@@ -184,8 +184,8 @@ precision highp int;
 
 uniform int u_mode;
 uniform float u_alpha_ref;
-uniform vec4 u_fog_vert;
-uniform vec4 u_fog_ram;
+uniform mediump vec4 u_fog_vert;
+uniform mediump vec4 u_fog_ram;
 uniform vec4 u_clip;
 uniform mediump sampler2D s_tex;
 
@@ -494,34 +494,23 @@ void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
         if (state == kNoState || !cur.bb.finite())
             continue;
 
-        const bool cur_is_line = (cur.item.count == kLineBatch);
         const bool cur_additive = state < t_states.size() && t_states[state].additive;
-        Box blocker_box = cur_additive ? Box{} : cur.bb;
-        bool has_blocker = !cur_additive;
+        Box blocker_box{};
+        bool has_blocker = false;
 
         const std::size_t limit = std::min(n, i + 1 + kMaxRegroupLookahead);
         for (std::size_t j = i + 1; j < limit; ++j) {
             if (emitted[j])
                 continue;
             const auto& cand = in[j];
-            const bool cand_is_line = (cand.item.count == kLineBatch);
-            if (cand.item.state == state && cand_is_line == cur_is_line &&
+            if (cand.item.state == state &&
                 (!has_blocker || !blocker_box.overlaps(cand.bb))) {
                 emitted[j] = 1;
                 out.push_back(cand.item);
-                if (!cur_additive) {
-                    blocker_box.grow(cand.bb.x0, cand.bb.y0);
-                    blocker_box.grow(cand.bb.x1, cand.bb.y1);
-                }
             } else {
                 const bool cand_additive =
                     cand.item.state < t_states.size() && t_states[cand.item.state].additive;
-                if (!cur_additive) {
-                    if (blocker_box.overlaps(cand.bb)) {
-                        blocker_box.grow(cand.bb.x0, cand.bb.y0);
-                        blocker_box.grow(cand.bb.x1, cand.bb.y1);
-                    }
-                } else if (!cand_additive && cand.bb.finite()) {
+                if (!(cur_additive && cand_additive) && cand.bb.finite()) {
                     blocker_box.grow(cand.bb.x0, cand.bb.y0);
                     blocker_box.grow(cand.bb.x1, cand.bb.y1);
                     has_blocker = true;
@@ -808,22 +797,24 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
     }
 
     const std::size_t vcount = frame.vertices.size();
-    const std::size_t bytes = vcount * kVertexBytes;
+    const std::size_t max_verts = vcount + frame.line_edges.size() * 4;
     const unsigned ring_slot = ring_next_;
     HostBuffer& vb = vertex_ring_[ring_slot];
     ring_next_ = (ring_next_ + 1) % kVertexRing;
 
-    if (vcount != 0) {
-        vb.ensure(*ctx_, bytes);
-        auto* out = static_cast<std::uint8_t*>(vb.mapped());
+    std::uint8_t* vb_base = nullptr;
+    if (max_verts != 0) {
+        vb.ensure(*ctx_, max_verts * kVertexBytes);
+        vb_base = static_cast<std::uint8_t*>(vb.mapped());
+        std::uint8_t* out = vb_base;
         for (const Vertex& v : frame.vertices) {
             std::memcpy(out, &v, sizeof v);
             const float fog = table_fog ? fog_table_value(geometry.fog, v.z) : 0.0f;
             std::memcpy(out + sizeof v, &fog, sizeof fog);
             out += kVertexBytes;
         }
-        vb.upload_to_target(GL_ARRAY_BUFFER, bytes);
     }
+    std::uint32_t line_vert_at = static_cast<std::uint32_t>(vcount);
 
     PushConstants push{};
     push.scale[0] = 2.0f / geometry.width;
@@ -983,6 +974,8 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                 bb.y1 += hw;
                 if (box_off_region(bb))
                     continue;
+                if (even != kNoState)
+                    indices += std::size_t{lb.count} * 6;
                 const Item item{lb.count ? sum / static_cast<float>(2 * lb.count) : 0.0f, p.first, kLineBatch, even};
                 if (blended)
                     add_translucent(item, bb);
@@ -990,7 +983,8 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                     items.push_back(item);
                 continue;
             }
-            if (blended && per_triangle && p.count > 3) {
+            const bool is_additive = even < t_states.size() && t_states[even].additive;
+            if (blended && per_triangle && !is_additive && p.count > 3) {
                 for (std::uint32_t i = 0; i + 2 < p.count; ++i) {
                     const Vertex& a = frame.vertices[p.first + i];
                     const Vertex& b = frame.vertices[p.first + i + 1];
@@ -1047,16 +1041,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
     }
     std::uint32_t at = 0;
 
-    LineInstance* li = nullptr;
-    HostBuffer* lb = nullptr;
-    std::uint32_t line_at = 0;
-    if (!frame.line_edges.empty()) {
-        lb = &line_ring_[ring_slot];
-        lb->ensure(*ctx_, frame.line_edges.size() * sizeof(LineInstance));
-        li = static_cast<LineInstance*>(lb->mapped());
-    }
-
-    enum class CmdType { Triangles, Lines, ModifierVolume };
+    enum class CmdType { Triangles, ModifierVolume };
     struct DrawCmd {
         CmdType type;
         std::uint32_t state_id;
@@ -1076,18 +1061,6 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         }
     };
 
-    struct LineRunRec {
-        std::uint32_t id = kNoState;
-        std::uint32_t first = 0, count = 0;
-    } cur_line_run;
-
-    auto flush_lines = [&] {
-        if (cur_line_run.count != 0) {
-            cmds.push_back({CmdType::Lines, cur_line_run.id, cur_line_run.first, cur_line_run.count});
-            cur_line_run.count = 0;
-        }
-    };
-
     const auto line_off_region = [&](const LineEdge& le, float hw) {
         return (std::max(le.xa, le.xb) + hw < geometry.left) ||
                (std::min(le.xa, le.xb) - hw > geometry.left + geometry.width) ||
@@ -1100,39 +1073,61 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         const Item& item = items[index];
         if (!volumes_drawn && index == translucent_start) {
             flush_tris();
-            flush_lines();
             cmds.push_back({CmdType::ModifierVolume, 0, 0, 0});
             volumes_drawn = true;
         }
         if (item.count == kLineBatch) {
-            flush_tris();
-            if (li && item.state != kNoState) {
+            if (vb_base && idx && item.state != kNoState) {
                 const LineBatch& b = frame.lines[item.first];
                 if (b.count != 0) {
-                    if (cur_line_run.count != 0 && cur_line_run.id != item.state)
-                        flush_lines();
-                    if (cur_line_run.count == 0) {
-                        cur_line_run.id = item.state;
-                        cur_line_run.first = line_at;
-                    }
+                    const std::uint32_t first_index = at;
                     const float hw = std::abs(b.half_width);
                     for (std::uint32_t e = b.first; e < b.first + b.count; ++e) {
                         const LineEdge& le = frame.line_edges[e];
                         if (line_off_region(le, hw))
                             continue;
-                        LineInstance& o = li[line_at++];
-                        o.a[0] = le.xa;
-                        o.a[1] = le.ya;
-                        o.a[2] = le.za;
-                        o.a[3] = table_fog ? fog_table_value(geometry.fog, le.za) : 0.0f;
-                        o.b[0] = le.xb;
-                        o.b[1] = le.yb;
-                        o.b[2] = le.zb;
-                        o.b[3] = table_fog ? fog_table_value(geometry.fog, le.zb) : 0.0f;
-                        o.base = b.base;
-                        o.offset = b.offset;
-                        o.half_width = b.half_width;
-                        ++cur_line_run.count;
+                        float f6 = le.xb - le.xa;
+                        float f5 = le.yb - le.ya;
+                        const float len_sq = f6 * f6 + f5 * f5;
+                        if (len_sq <= 0.0f)
+                            continue;
+                        const float s = (1.0f / std::sqrt(len_sq)) * b.half_width;
+                        f5 *= s;
+                        f6 *= s;
+                        if (0.0f > f5) {
+                            f5 = -f5;
+                            f6 = -f6;
+                        }
+                        const float fog_a = table_fog ? fog_table_value(geometry.fog, le.za) : 0.0f;
+                        const float fog_b = table_fog ? fog_table_value(geometry.fog, le.zb) : 0.0f;
+                        auto emit_line_vert = [&](float x, float y, float z, float fog) {
+                            Vertex lv{x, y, z, 0.0f, 0.0f, b.base, b.offset};
+                            std::uint8_t* dst = vb_base + static_cast<std::size_t>(line_vert_at) * kVertexBytes;
+                            std::memcpy(dst, &lv, sizeof lv);
+                            std::memcpy(dst + sizeof lv, &fog, sizeof fog);
+                            return line_vert_at++;
+                        };
+                        const std::uint32_t v0 = emit_line_vert(le.xb - f5, le.yb + f6, le.zb, fog_b);
+                        const std::uint32_t v1 = emit_line_vert(le.xb + f5, le.yb - f6, le.zb, fog_b);
+                        const std::uint32_t v2 = emit_line_vert(le.xa - f5, le.ya + f6, le.za, fog_a);
+                        const std::uint32_t v3 = emit_line_vert(le.xa + f5, le.ya - f6, le.za, fog_a);
+                        idx[at + 0] = v0;
+                        idx[at + 1] = v1;
+                        idx[at + 2] = v2;
+                        idx[at + 3] = v1;
+                        idx[at + 4] = v3;
+                        idx[at + 5] = v2;
+                        at += 6;
+                    }
+                    if (at > first_index) {
+                        if (cur_tri_count != 0 && item.state == cur_tri_state) {
+                            cur_tri_count += at - first_index;
+                        } else {
+                            flush_tris();
+                            cur_tri_state = item.state;
+                            cur_tri_first = first_index;
+                            cur_tri_count = at - first_index;
+                        }
                     }
                 }
             }
@@ -1141,7 +1136,6 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         const std::uint32_t id = item.state;
         if (id == kNoState || item.count < 3)
             continue;
-        flush_lines();
         const std::uint32_t first_index = at;
         const bool odd_start = (item.first & kOddWindingBit) != 0;
         const std::uint32_t base_v = item.first & ~kOddWindingBit;
@@ -1163,21 +1157,12 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         }
     }
     flush_tris();
-    flush_lines();
     if (!volumes_drawn)
         cmds.push_back({CmdType::ModifierVolume, 0, 0, 0});
 
     GLuint active_vao = 0;
-    if (lb && line_at > 0) {
-        glBindVertexArray(lines_vao_);
-        active_vao = lines_vao_;
-        lb->upload_to_target(GL_ARRAY_BUFFER, line_at * sizeof(LineInstance));
-        for (GLuint i = 0; i < 5; ++i) {
-            glEnableVertexAttribArray(i);
-            glVertexAttribDivisor(i, 1);
-        }
-    }
-    if (ib && at > 0 && vcount > 0) {
+    if (ib && at > 0 && line_vert_at > 0) {
+        vb.upload_to_target(GL_ARRAY_BUFFER, static_cast<std::size_t>(line_vert_at) * kVertexBytes);
         glBindVertexArray(geom_vao_);
         active_vao = geom_vao_;
         glBindBuffer(GL_ARRAY_BUFFER, vb.gl_buffer());
@@ -1193,15 +1178,11 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         ib->upload_to_target(GL_ELEMENT_ARRAY_BUFFER, at * sizeof(std::uint32_t));
     }
 
-    auto prog_for = [this](const PipelineKey& key, bool is_line) -> GLuint {
-        if (is_line)
-            return key.discard ? prog_lines_d_ : prog_lines_nd_;
+    auto prog_for = [this](const PipelineKey& key) -> GLuint {
         return key.discard ? prog_geom_d_ : prog_geom_nd_;
     };
 
-    auto uniforms_for = [this](const PipelineKey& key, bool is_line) -> const ShaderUniforms& {
-        if (is_line)
-            return key.discard ? u_lines_d_ : u_lines_nd_;
+    auto uniforms_for = [this](const PipelineKey& key) -> const ShaderUniforms& {
         return key.discard ? u_geom_d_ : u_geom_nd_;
     };
 
@@ -1243,16 +1224,15 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
 
         const DrawState& st = t_states[cmd.state_id];
         const PipelineKey key = key_from_bits(st.key);
-        const bool is_line = (cmd.type == CmdType::Lines);
-        const unsigned prog_idx = (is_line ? 2u : 0u) | (key.discard ? 1u : 0u);
-        const GLuint prog = prog_for(key, is_line);
+        const unsigned prog_idx = key.discard ? 1u : 0u;
+        const GLuint prog = prog_for(key);
 
         if (active_prog != prog) {
             glUseProgram(prog);
             active_prog = prog;
         }
 
-        const auto& u = uniforms_for(key, is_line);
+        const auto& u = uniforms_for(key);
         if (!prog_frame_inited[prog_idx]) {
             if (u.u_tex >= 0) glUniform1i(u.u_tex, 0);
             if (u.u_scale >= 0) glUniform2fv(u.u_scale, 1, push.scale);
@@ -1351,32 +1331,12 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
             has_scissor = true;
         }
 
-        if (is_line) {
-            if (active_vao != lines_vao_) {
-                glBindVertexArray(lines_vao_);
-                glBindBuffer(GL_ARRAY_BUFFER, lb->gl_buffer());
-                active_vao = lines_vao_;
-            }
-            const std::size_t off = static_cast<std::size_t>(cmd.first) * sizeof(LineInstance);
-            glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(LineInstance),
-                                  reinterpret_cast<const void*>(off + offsetof(LineInstance, a)));
-            glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(LineInstance),
-                                  reinterpret_cast<const void*>(off + offsetof(LineInstance, b)));
-            glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(LineInstance),
-                                  reinterpret_cast<const void*>(off + offsetof(LineInstance, base)));
-            glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(LineInstance),
-                                  reinterpret_cast<const void*>(off + offsetof(LineInstance, offset)));
-            glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(LineInstance),
-                                  reinterpret_cast<const void*>(off + offsetof(LineInstance, half_width)));
-            glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(cmd.count));
-        } else {
-            if (active_vao != geom_vao_) {
-                glBindVertexArray(geom_vao_);
-                active_vao = geom_vao_;
-            }
-            glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(cmd.count), GL_UNSIGNED_INT,
-                           reinterpret_cast<const void*>(static_cast<std::uintptr_t>(cmd.first) * sizeof(std::uint32_t)));
+        if (active_vao != geom_vao_) {
+            glBindVertexArray(geom_vao_);
+            active_vao = geom_vao_;
         }
+        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(cmd.count), GL_UNSIGNED_INT,
+                       reinterpret_cast<const void*>(static_cast<std::uintptr_t>(cmd.first) * sizeof(std::uint32_t)));
     }
 
     glBindVertexArray(0);
