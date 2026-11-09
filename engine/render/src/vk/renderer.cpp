@@ -474,6 +474,8 @@ struct Translucent {
     Box bb;
 };
 
+constexpr std::size_t kMaxRegroupLookahead = 512;
+
 void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
     const std::size_t n = in.size();
     if (n == 0)
@@ -492,19 +494,38 @@ void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
         if (state == kNoState || !cur.bb.finite())
             continue;
 
-        Box union_box = cur.bb;
-        for (std::size_t j = i + 1; j < n; ++j) {
+        const bool cur_is_line = (cur.item.count == kLineBatch);
+        const bool cur_additive = state < t_states.size() && t_states[state].additive;
+        Box blocker_box = cur_additive ? Box{} : cur.bb;
+        bool has_blocker = !cur_additive;
+
+        const std::size_t limit = std::min(n, i + 1 + kMaxRegroupLookahead);
+        for (std::size_t j = i + 1; j < limit; ++j) {
             if (emitted[j])
                 continue;
             const auto& cand = in[j];
-            if (cand.item.state == state && !union_box.overlaps(cand.bb)) {
+            const bool cand_is_line = (cand.item.count == kLineBatch);
+            if (cand.item.state == state && cand_is_line == cur_is_line &&
+                (!has_blocker || !blocker_box.overlaps(cand.bb))) {
                 emitted[j] = 1;
                 out.push_back(cand.item);
-                union_box.grow(cand.bb.x0, cand.bb.y0);
-                union_box.grow(cand.bb.x1, cand.bb.y1);
-            } else if (union_box.overlaps(cand.bb)) {
-                union_box.grow(cand.bb.x0, cand.bb.y0);
-                union_box.grow(cand.bb.x1, cand.bb.y1);
+                if (!cur_additive) {
+                    blocker_box.grow(cand.bb.x0, cand.bb.y0);
+                    blocker_box.grow(cand.bb.x1, cand.bb.y1);
+                }
+            } else {
+                const bool cand_additive =
+                    cand.item.state < t_states.size() && t_states[cand.item.state].additive;
+                if (!cur_additive) {
+                    if (blocker_box.overlaps(cand.bb)) {
+                        blocker_box.grow(cand.bb.x0, cand.bb.y0);
+                        blocker_box.grow(cand.bb.x1, cand.bb.y1);
+                    }
+                } else if (!cand_additive && cand.bb.finite()) {
+                    blocker_box.grow(cand.bb.x0, cand.bb.y0);
+                    blocker_box.grow(cand.bb.x1, cand.bb.y1);
+                    has_blocker = true;
+                }
             }
         }
     }
@@ -514,6 +535,9 @@ bool same_rect(const VkRect2D& a, const VkRect2D& b) noexcept {
     return a.offset.x == b.offset.x && a.offset.y == b.offset.y &&
            a.extent.width == b.extent.width && a.extent.height == b.extent.height;
 }
+
+constexpr std::uint32_t kOddWindingBit = 0x80000000u;
+constexpr std::uint32_t kGlPipelineStateMask = 0x7FFFu;
 
 }  // namespace
 
@@ -649,7 +673,8 @@ void Renderer::prepare(VkCommandBuffer upload, const Frame& frame) {
         std::uint32_t tcw = 0, tsp = 0;
         bool tiled = false;
     };
-    std::unordered_map<std::uint64_t, Use> used;
+    thread_local std::unordered_map<std::uint64_t, Use> used;
+    used.clear();
     for (const auto& list : frame.lists) {
         for (const Polygon& p : list) {
             if (!pcw_texture(p.pcw))
@@ -828,15 +853,13 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         };
     };
 
-    const auto state_of = [&](const Polygon& p, bool blended, bool alpha_test, bool odd, DrawState& st) {
+    const auto state_of = [&](const Polygon& p, bool blended, bool alpha_test, DrawState& st) {
         PipelineKey key{};
         key.depth_mode = isp_depth_mode(p.isp) & 7u;
         if (alpha_test || (blended && geometry.autosort))
             key.depth_mode = 6u;
         key.depth_write = alpha_test ? 1u : (blended || isp_z_write_disable(p.isp)) ? 0u : 1u;
         key.cull_mode = isp_cull_mode(p.isp) & 3u;
-        if (odd && key.cull_mode >= 2u)
-            key.cull_mode ^= 1u;
         key.blend = blended ? 1u : 0u;
         key.src_blend = tsp_src_instr(p.tsp) & 7u;
         key.dst_blend = tsp_dst_instr(p.tsp) & 7u;
@@ -845,6 +868,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         key.shadow = (!blended) ? (pcw_shadow(p.pcw) & 1u) : 0u;
         const std::uint32_t mode = p.tile_clip & 3u;
         key.discard = (alpha_test || mode == 3) ? 1u : 0u;
+        key.shader = 0;
         key.padding = 0;
 
         st.set = 0;
@@ -881,11 +905,6 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         st.push.alpha_ref = geometry.alpha_ref;
         if (!st.set)
             st.set = fallback_set_;
-
-        std::uint32_t shader = static_cast<std::uint32_t>(st.push.mode) & 0x3FFu;
-        if (((shader >> 7) & 3u) == 1u && !(shader & 16u))
-            shader = (shader & ~(3u << 7)) | (2u << 7);
-        key.shader = shader & 0x3FFu;
 
         st.key = key.bits();
         st.ok = true;
@@ -940,13 +959,11 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                 indices += std::size_t{verts - 2} * 3;
         };
         const Polygon* last = nullptr;
-        std::uint32_t even = kNoState, odd = kNoState;
-        bool odd_known = false;
+        std::uint32_t even = kNoState;
         for (const Polygon& p : frame.lists[static_cast<unsigned>(list)]) {
             if (!last || !same_header(*last, p)) {
                 DrawState st;
-                even = state_of(p, blended, alpha_test, false, st) ? intern(st) : kNoState;
-                odd_known = false;
+                even = state_of(p, blended, alpha_test, st) ? intern(st) : kNoState;
                 last = &p;
             }
             if (p.line_batch) {
@@ -974,13 +991,6 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                 continue;
             }
             if (blended && per_triangle && p.count > 3) {
-                if (!odd_known) {
-                    odd = even;
-                    DrawState st;
-                    if ((isp_cull_mode(p.isp) & 3u) >= 2u)
-                        odd = state_of(p, blended, alpha_test, true, st) ? intern(st) : kNoState;
-                    odd_known = true;
-                }
                 for (std::uint32_t i = 0; i + 2 < p.count; ++i) {
                     const Vertex& a = frame.vertices[p.first + i];
                     const Vertex& b = frame.vertices[p.first + i + 1];
@@ -988,13 +998,13 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                     if ((a.x == b.x && a.y == b.y) || (b.x == c.x && b.y == c.y) ||
                         (a.x == c.x && a.y == c.y))
                         continue;
-                    const std::uint32_t id = (i & 1u) ? odd : even;
-                    count(id, 3u);
+                    count(even, 3u);
                     Box bb;
                     bb.grow(a);
                     bb.grow(b);
                     bb.grow(c);
-                    add_translucent({(a.z + b.z + c.z) * (1.0f / 3.0f), p.first + i, 3u, id}, bb);
+                    const std::uint32_t encoded_first = (p.first + i) | ((i & 1u) ? kOddWindingBit : 0u);
+                    add_translucent({(a.z + b.z + c.z) * (1.0f / 3.0f), encoded_first, 3u, even}, bb);
                 }
                 continue;
             }
@@ -1053,7 +1063,8 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         std::uint32_t first;
         std::uint32_t count;
     };
-    std::vector<DrawCmd> cmds;
+    thread_local std::vector<DrawCmd> cmds;
+    cmds.clear();
     std::uint32_t cur_tri_state = kNoState;
     std::uint32_t cur_tri_first = 0;
     std::uint32_t cur_tri_count = 0;
@@ -1132,11 +1143,14 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
             continue;
         flush_lines();
         const std::uint32_t first_index = at;
+        const bool odd_start = (item.first & kOddWindingBit) != 0;
+        const std::uint32_t base_v = item.first & ~kOddWindingBit;
         for (std::uint32_t j = 0; j + 2 < item.count; ++j) {
-            const std::uint32_t v = item.first + j;
+            const std::uint32_t v = base_v + j;
+            const bool flip = ((j & 1u) != 0) ^ odd_start;
             idx[at] = v;
-            idx[at + 1] = (j & 1u) ? v + 2 : v + 1;
-            idx[at + 2] = (j & 1u) ? v + 1 : v + 2;
+            idx[at + 1] = flip ? v + 2 : v + 1;
+            idx[at + 2] = flip ? v + 1 : v + 2;
             at += 3;
         }
         if (cur_tri_count != 0 && id == cur_tri_state) {
@@ -1153,10 +1167,31 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
     if (!volumes_drawn)
         cmds.push_back({CmdType::ModifierVolume, 0, 0, 0});
 
-    if (ib && at > 0)
-        ib->upload_to_target(GL_ELEMENT_ARRAY_BUFFER, at * sizeof(std::uint32_t));
-    if (lb && line_at > 0)
+    GLuint active_vao = 0;
+    if (lb && line_at > 0) {
+        glBindVertexArray(lines_vao_);
+        active_vao = lines_vao_;
         lb->upload_to_target(GL_ARRAY_BUFFER, line_at * sizeof(LineInstance));
+        for (GLuint i = 0; i < 5; ++i) {
+            glEnableVertexAttribArray(i);
+            glVertexAttribDivisor(i, 1);
+        }
+    }
+    if (ib && at > 0 && vcount > 0) {
+        glBindVertexArray(geom_vao_);
+        active_vao = geom_vao_;
+        glBindBuffer(GL_ARRAY_BUFFER, vb.gl_buffer());
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(0));
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(12));
+        glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(20));
+        glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(24));
+        glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(28));
+        for (GLuint i = 0; i < 5; ++i) {
+            glEnableVertexAttribArray(i);
+            glVertexAttribDivisor(i, 0);
+        }
+        ib->upload_to_target(GL_ELEMENT_ARRAY_BUFFER, at * sizeof(std::uint32_t));
+    }
 
     auto prog_for = [this](const PipelineKey& key, bool is_line) -> GLuint {
         if (is_line)
@@ -1170,75 +1205,158 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         return key.discard ? u_geom_d_ : u_geom_nd_;
     };
 
-    auto apply_pipeline_state = [&](const PipelineKey& key, bool is_line) {
-        GLuint prog = prog_for(key, is_line);
-        glUseProgram(prog);
-        glUniform1i(uniforms_for(key, is_line).u_tex, 0);
+    GLuint active_prog = 0;
+    std::uint32_t active_state_bits = ~0u;
+    GLuint active_tex = ~0u;
+    GLuint active_sampler = ~0u;
+    VkRect2D active_scissor{};
+    bool has_scissor = false;
 
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(depth_compare(key.depth_mode));
-        glDepthMask(key.depth_write ? GL_TRUE : GL_FALSE);
-
-        apply_pvr_cull_mode(static_cast<std::uint8_t>(key.cull_mode));
-
-        if (key.blend) {
-            glEnable(GL_BLEND);
-            glBlendFuncSeparate(src_factor(key.src_blend), dst_factor(key.dst_blend),
-                                src_factor(key.src_blend), dst_factor(key.dst_blend));
-        } else {
-            glDisable(GL_BLEND);
-        }
-
-        if (key.shadow) {
-            glEnable(GL_STENCIL_TEST);
-            glStencilFunc(GL_EQUAL, 0, 0xFF);
-            glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-        } else {
-            glDisable(GL_STENCIL_TEST);
-        }
+    bool prog_frame_inited[4] = {};
+    std::int32_t prog_last_mode[4] = {
+        std::numeric_limits<std::int32_t>::min(),
+        std::numeric_limits<std::int32_t>::min(),
+        std::numeric_limits<std::int32_t>::min(),
+        std::numeric_limits<std::int32_t>::min(),
     };
+    float prog_last_clip[4][4] = {};
+    bool prog_has_clip[4] = {};
 
-    auto apply_uniforms = [](const ShaderUniforms& u, const DrawState& st) {
-        if (u.u_scale >= 0) glUniform2fv(u.u_scale, 1, st.push.scale);
-        if (u.u_offset >= 0) glUniform2fv(u.u_offset, 1, st.push.offset);
-        if (u.u_mode >= 0) glUniform1i(u.u_mode, st.push.mode);
-        if (u.u_alpha_ref >= 0) glUniform1f(u.u_alpha_ref, st.push.alpha_ref);
-        if (u.u_fog_vert >= 0) glUniform4fv(u.u_fog_vert, 1, st.push.fog_vert);
-        if (u.u_fog_ram >= 0) glUniform4fv(u.u_fog_ram, 1, st.push.fog_ram);
-        if (u.u_clip >= 0) glUniform4fv(u.u_clip, 1, st.push.clip);
-    };
-
-    auto apply_texture = [](VkDescriptorSet set) {
-        const std::uint32_t sampler = static_cast<std::uint32_t>(set >> 32);
-        const std::uint32_t tex = static_cast<std::uint32_t>(set & 0xFFFFFFFFu);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glBindSampler(0, sampler);
-    };
-
-    auto apply_scissor = [](const VkRect2D& sc) {
-        glEnable(GL_SCISSOR_TEST);
-        const GLint x = static_cast<GLint>(sc.offset.x);
-        const GLint y = static_cast<GLint>(sc.offset.y);
-        const GLsizei w = static_cast<GLsizei>(sc.extent.width);
-        const GLsizei h = static_cast<GLsizei>(sc.extent.height);
-        glScissor(std::max(0, x), std::max(0, y), std::max(0, w), std::max(0, h));
-    };
+    glActiveTexture(GL_TEXTURE0);
+    glEnable(GL_SCISSOR_TEST);
 
     for (const auto& cmd : cmds) {
         if (cmd.type == CmdType::ModifierVolume) {
-            draw_modifier_volumes(frame, geometry);
+            if (!frame.modifiers.empty()) {
+                draw_modifier_volumes(frame, geometry);
+                active_prog = 0;
+                active_vao = 0;
+                active_state_bits = ~0u;
+                active_tex = ~0u;
+                active_sampler = ~0u;
+                has_scissor = false;
+                glEnable(GL_SCISSOR_TEST);
+                glActiveTexture(GL_TEXTURE0);
+            }
             continue;
         }
+
         const DrawState& st = t_states[cmd.state_id];
         const PipelineKey key = key_from_bits(st.key);
-        if (cmd.type == CmdType::Lines) {
-            apply_pipeline_state(key, true);
-            apply_uniforms(uniforms_for(key, true), st);
-            apply_texture(st.set);
-            apply_scissor(st.scissor);
-            glBindVertexArray(lines_vao_);
-            glBindBuffer(GL_ARRAY_BUFFER, lb->gl_buffer());
+        const bool is_line = (cmd.type == CmdType::Lines);
+        const unsigned prog_idx = (is_line ? 2u : 0u) | (key.discard ? 1u : 0u);
+        const GLuint prog = prog_for(key, is_line);
+
+        if (active_prog != prog) {
+            glUseProgram(prog);
+            active_prog = prog;
+        }
+
+        const auto& u = uniforms_for(key, is_line);
+        if (!prog_frame_inited[prog_idx]) {
+            if (u.u_tex >= 0) glUniform1i(u.u_tex, 0);
+            if (u.u_scale >= 0) glUniform2fv(u.u_scale, 1, push.scale);
+            if (u.u_offset >= 0) glUniform2fv(u.u_offset, 1, push.offset);
+            if (u.u_alpha_ref >= 0) glUniform1f(u.u_alpha_ref, geometry.alpha_ref);
+            if (u.u_fog_vert >= 0) glUniform4fv(u.u_fog_vert, 1, push.fog_vert);
+            if (u.u_fog_ram >= 0) glUniform4fv(u.u_fog_ram, 1, push.fog_ram);
+            prog_frame_inited[prog_idx] = true;
+        }
+
+        if (prog_last_mode[prog_idx] != st.push.mode) {
+            if (u.u_mode >= 0) glUniform1i(u.u_mode, st.push.mode);
+            prog_last_mode[prog_idx] = st.push.mode;
+        }
+        if ((st.push.mode & 512) != 0) {
+            if (!prog_has_clip[prog_idx] ||
+                std::memcmp(prog_last_clip[prog_idx], st.push.clip, sizeof st.push.clip) != 0) {
+                if (u.u_clip >= 0) glUniform4fv(u.u_clip, 1, st.push.clip);
+                std::memcpy(prog_last_clip[prog_idx], st.push.clip, sizeof st.push.clip);
+                prog_has_clip[prog_idx] = true;
+            }
+        }
+
+        const std::uint32_t new_state_bits = st.key & kGlPipelineStateMask;
+        if (new_state_bits != active_state_bits) {
+            if (active_state_bits == ~0u) {
+                glEnable(GL_DEPTH_TEST);
+                glDepthFunc(depth_compare(key.depth_mode));
+                glDepthMask(key.depth_write ? GL_TRUE : GL_FALSE);
+                apply_pvr_cull_mode(static_cast<std::uint8_t>(key.cull_mode));
+                if (key.blend) {
+                    glEnable(GL_BLEND);
+                    glBlendFuncSeparate(src_factor(key.src_blend), dst_factor(key.dst_blend),
+                                        src_factor(key.src_blend), dst_factor(key.dst_blend));
+                } else {
+                    glDisable(GL_BLEND);
+                }
+                if (key.shadow) {
+                    glEnable(GL_STENCIL_TEST);
+                    glStencilFunc(GL_EQUAL, 0, 0xFF);
+                    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+                } else {
+                    glDisable(GL_STENCIL_TEST);
+                }
+            } else {
+                const PipelineKey prev = key_from_bits(active_state_bits);
+                if (prev.depth_mode != key.depth_mode)
+                    glDepthFunc(depth_compare(key.depth_mode));
+                if (prev.depth_write != key.depth_write)
+                    glDepthMask(key.depth_write ? GL_TRUE : GL_FALSE);
+                if (prev.cull_mode != key.cull_mode)
+                    apply_pvr_cull_mode(static_cast<std::uint8_t>(key.cull_mode));
+                if (prev.blend != key.blend) {
+                    if (key.blend) {
+                        glEnable(GL_BLEND);
+                        glBlendFuncSeparate(src_factor(key.src_blend), dst_factor(key.dst_blend),
+                                            src_factor(key.src_blend), dst_factor(key.dst_blend));
+                    } else {
+                        glDisable(GL_BLEND);
+                    }
+                } else if (key.blend && (prev.src_blend != key.src_blend || prev.dst_blend != key.dst_blend)) {
+                    glBlendFuncSeparate(src_factor(key.src_blend), dst_factor(key.dst_blend),
+                                        src_factor(key.src_blend), dst_factor(key.dst_blend));
+                }
+                if (prev.shadow != key.shadow) {
+                    if (key.shadow) {
+                        glEnable(GL_STENCIL_TEST);
+                        glStencilFunc(GL_EQUAL, 0, 0xFF);
+                        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+                    } else {
+                        glDisable(GL_STENCIL_TEST);
+                    }
+                }
+            }
+            active_state_bits = new_state_bits;
+        }
+
+        const std::uint32_t sampler = static_cast<std::uint32_t>(st.set >> 32);
+        const std::uint32_t tex = static_cast<std::uint32_t>(st.set & 0xFFFFFFFFu);
+        if (tex != active_tex) {
+            glBindTexture(GL_TEXTURE_2D, tex);
+            active_tex = tex;
+        }
+        if (sampler != active_sampler) {
+            glBindSampler(0, sampler);
+            active_sampler = sampler;
+        }
+
+        if (!has_scissor || !same_rect(active_scissor, st.scissor)) {
+            const GLint x = static_cast<GLint>(st.scissor.offset.x);
+            const GLint y = static_cast<GLint>(st.scissor.offset.y);
+            const GLsizei w = static_cast<GLsizei>(st.scissor.extent.width);
+            const GLsizei h = static_cast<GLsizei>(st.scissor.extent.height);
+            glScissor(std::max(0, x), std::max(0, y), std::max(0, w), std::max(0, h));
+            active_scissor = st.scissor;
+            has_scissor = true;
+        }
+
+        if (is_line) {
+            if (active_vao != lines_vao_) {
+                glBindVertexArray(lines_vao_);
+                glBindBuffer(GL_ARRAY_BUFFER, lb->gl_buffer());
+                active_vao = lines_vao_;
+            }
             const std::size_t off = static_cast<std::size_t>(cmd.first) * sizeof(LineInstance);
             glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(LineInstance),
                                   reinterpret_cast<const void*>(off + offsetof(LineInstance, a)));
@@ -1250,28 +1368,12 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                                   reinterpret_cast<const void*>(off + offsetof(LineInstance, offset)));
             glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(LineInstance),
                                   reinterpret_cast<const void*>(off + offsetof(LineInstance, half_width)));
-            for (int i = 0; i < 5; ++i) {
-                glEnableVertexAttribArray(static_cast<GLuint>(i));
-                glVertexAttribDivisor(static_cast<GLuint>(i), 1);
-            }
             glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(cmd.count));
         } else {
-            apply_pipeline_state(key, false);
-            apply_uniforms(uniforms_for(key, false), st);
-            apply_texture(st.set);
-            apply_scissor(st.scissor);
-            glBindVertexArray(geom_vao_);
-            glBindBuffer(GL_ARRAY_BUFFER, vb.gl_buffer());
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(0));
-            glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(12));
-            glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(20));
-            glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(24));
-            glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(28));
-            for (int i = 0; i < 5; ++i) {
-                glEnableVertexAttribArray(static_cast<GLuint>(i));
-                glVertexAttribDivisor(static_cast<GLuint>(i), 0);
+            if (active_vao != geom_vao_) {
+                glBindVertexArray(geom_vao_);
+                active_vao = geom_vao_;
             }
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ib->gl_buffer());
             glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(cmd.count), GL_UNSIGNED_INT,
                            reinterpret_cast<const void*>(static_cast<std::uintptr_t>(cmd.first) * sizeof(std::uint32_t)));
         }
