@@ -44,8 +44,8 @@ out vec2 v_uv;
 out mediump float v_fog;
 
 vec4 clip_position(vec3 p) {
-    const float inv_w = clamp(p.z, 1e-20, 131072.0);
-    const float w = 1.0 / inv_w;
+    float inv_w = clamp(p.z, 1e-20, 131072.0);
+    float w = 1.0 / inv_w;
     return vec4((p.xy * u_scale + u_offset) * w, (2.0 / 131072.0) - w, w);
 }
 
@@ -76,15 +76,15 @@ out vec2 v_uv;
 out mediump float v_fog;
 
 vec4 clip_position(vec3 p) {
-    const float inv_w = clamp(p.z, 1e-20, 131072.0);
-    const float w = 1.0 / inv_w;
+    float inv_w = clamp(p.z, 1e-20, 131072.0);
+    float w = 1.0 / inv_w;
     return vec4((p.xy * u_scale + u_offset) * w, (2.0 / 131072.0) - w, w);
 }
 
 void main() {
     float f6 = in_b.x - in_a.x;
     float f5 = in_b.y - in_a.y;
-    const float s = inversesqrt(f6 * f6 + f5 * f5) * in_half;
+    float s = inversesqrt(f6 * f6 + f5 * f5) * in_half;
     f5 *= s;
     f6 *= s;
     if (0.0 > f5) {
@@ -139,13 +139,13 @@ in mediump float v_fog;
 layout(location = 0) out mediump vec4 o_colour;
 
 void main() {
-    const int mode = u_mode;
+    int mode = u_mode;
     mediump vec4 base = v_base;
     if ((mode & 64) == 0)
         base.a = 1.0;
     mediump vec4 colour = base;
-    const mediump vec3 fog_ram = u_fog_ram.rgb;
-    const int fog = (mode >> 7) & 3;
+    mediump vec3 fog_ram = u_fog_ram.rgb;
+    int fog = (mode >> 7) & 3;
     if (fog == 3)
         colour = vec4(fog_ram, v_fog);
 
@@ -153,7 +153,7 @@ void main() {
         mediump vec4 texel = texture(s_tex, v_uv);
         if ((mode & 8) != 0)
             texel.a = 1.0;
-        const int shading = mode & 3;
+        int shading = mode & 3;
         if (shading == 0) {
             colour = texel;
         } else if (shading == 1) {
@@ -170,7 +170,7 @@ void main() {
     if (fog == 0) {
         colour.rgb = mix(colour.rgb, fog_ram, clamp(v_fog, 0.0, 1.0));
     } else if (fog == 1 && (mode & 16) != 0) {
-        const mediump vec3 fog_vert = u_fog_vert.rgb;
+        mediump vec3 fog_vert = u_fog_vert.rgb;
         colour.rgb = mix(colour.rgb, fog_vert, clamp(v_offset.a, 0.0, 1.0));
     }
 
@@ -197,7 +197,7 @@ in mediump float v_fog;
 layout(location = 0) out mediump vec4 o_colour;
 
 void main() {
-    const int mode = u_mode;
+    int mode = u_mode;
     if ((mode & 512) != 0 && gl_FragCoord.x >= u_clip.x && gl_FragCoord.x < u_clip.z &&
         gl_FragCoord.y >= u_clip.y && gl_FragCoord.y < u_clip.w)
         discard;
@@ -206,8 +206,8 @@ void main() {
     if ((mode & 64) == 0)
         base.a = 1.0;
     mediump vec4 colour = base;
-    const mediump vec3 fog_ram = u_fog_ram.rgb;
-    const int fog = (mode >> 7) & 3;
+    mediump vec3 fog_ram = u_fog_ram.rgb;
+    int fog = (mode >> 7) & 3;
     if (fog == 3)
         colour = vec4(fog_ram, v_fog);
 
@@ -215,7 +215,7 @@ void main() {
         mediump vec4 texel = texture(s_tex, v_uv);
         if ((mode & 8) != 0)
             texel.a = 1.0;
-        const int shading = mode & 3;
+        int shading = mode & 3;
         if (shading == 0) {
             colour = texel;
         } else if (shading == 1) {
@@ -232,12 +232,12 @@ void main() {
     if (fog == 0) {
         colour.rgb = mix(colour.rgb, fog_ram, clamp(v_fog, 0.0, 1.0));
     } else if (fog == 1 && (mode & 16) != 0) {
-        const mediump vec3 fog_vert = u_fog_vert.rgb;
+        mediump vec3 fog_vert = u_fog_vert.rgb;
         colour.rgb = mix(colour.rgb, fog_vert, clamp(v_offset.a, 0.0, 1.0));
     }
 
     if ((mode & 32) != 0) {
-        const highp float a = round(float(colour.a) * 255.0) / 255.0;
+        highp float a = round(float(colour.a) * 255.0) / 255.0;
         if (a < u_alpha_ref)
             discard;
         colour.a = 1.0;
@@ -256,8 +256,8 @@ uniform vec2 u_offset;
 layout(location = 0) in vec3 in_pos;
 
 vec4 clip_position(vec3 p) {
-    const float inv_w = clamp(p.z, 1e-20, 131072.0);
-    const float w = 1.0 / inv_w;
+    float inv_w = clamp(p.z, 1e-20, 131072.0);
+    float w = 1.0 / inv_w;
     return vec4((p.xy * u_scale + u_offset) * w, (2.0 / 131072.0) - w, w);
 }
 
@@ -377,6 +377,16 @@ GLenum dst_factor(std::uint32_t instr) {
         case 6: return GL_DST_ALPHA;
         default: return GL_ONE_MINUS_DST_ALPHA;
     }
+}
+
+void apply_pvr_cull_mode(std::uint8_t cull_mode) {
+    if (cull_mode < 2) {
+        glDisable(GL_CULL_FACE);
+        return;
+    }
+    glEnable(GL_CULL_FACE);
+    glFrontFace(GL_CW);
+    glCullFace(cull_mode == 2 ? GL_FRONT : GL_BACK);
 }
 
 constexpr std::uint64_t texture_key(const Polygon& p) {
@@ -685,7 +695,7 @@ void Renderer::draw_modifier_volumes(const Frame& frame, const FrameGeometry& ge
     const std::size_t bytes = staging_.size() * sizeof(float);
     buf.ensure(*ctx_, bytes);
     buf.write(staging_.data(), bytes);
-    buf.upload_to_target(GL_ARRAY_BUFFER);
+    buf.upload_to_target(GL_ARRAY_BUFFER, bytes);
 
     glBindVertexArray(modvol_vao_);
     glBindBuffer(GL_ARRAY_BUFFER, buf.gl_buffer());
@@ -719,13 +729,7 @@ void Renderer::draw_modifier_volumes(const Frame& frame, const FrameGeometry& ge
         if (base == SIZE_MAX)
             base = first;
 
-        if (cull == 0) {
-            glDisable(GL_CULL_FACE);
-        } else {
-            glEnable(GL_CULL_FACE);
-            glFrontFace(GL_CCW);
-            glCullFace(cull == 1 ? GL_FRONT : GL_BACK);
-        }
+        apply_pvr_cull_mode(static_cast<std::uint8_t>(cull));
 
         if (!volume_last && mv_mode > 0) {
             glStencilFunc(GL_ALWAYS, 1, 0xFF);
@@ -793,7 +797,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
             std::memcpy(out + sizeof v, &fog, sizeof fog);
             out += kVertexBytes;
         }
-        vb.upload_to_target(GL_ARRAY_BUFFER);
+        vb.upload_to_target(GL_ARRAY_BUFFER, bytes);
     }
 
     PushConstants push{};
@@ -1150,9 +1154,9 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         cmds.push_back({CmdType::ModifierVolume, 0, 0, 0});
 
     if (ib && at > 0)
-        ib->upload_to_target(GL_ELEMENT_ARRAY_BUFFER);
+        ib->upload_to_target(GL_ELEMENT_ARRAY_BUFFER, at * sizeof(std::uint32_t));
     if (lb && line_at > 0)
-        lb->upload_to_target(GL_ARRAY_BUFFER);
+        lb->upload_to_target(GL_ARRAY_BUFFER, line_at * sizeof(LineInstance));
 
     auto prog_for = [this](const PipelineKey& key, bool is_line) -> GLuint {
         if (is_line)
@@ -1175,13 +1179,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         glDepthFunc(depth_compare(key.depth_mode));
         glDepthMask(key.depth_write ? GL_TRUE : GL_FALSE);
 
-        if (key.cull_mode == 0) {
-            glDisable(GL_CULL_FACE);
-        } else {
-            glEnable(GL_CULL_FACE);
-            glFrontFace(GL_CCW);
-            glCullFace(key.cull_mode == 1 ? GL_FRONT : GL_BACK);
-        }
+        apply_pvr_cull_mode(static_cast<std::uint8_t>(key.cull_mode));
 
         if (key.blend) {
             glEnable(GL_BLEND);
@@ -1218,13 +1216,13 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
         glBindSampler(0, sampler);
     };
 
-    auto apply_scissor = [](const VkRect2D& sc, std::uint32_t target_h) {
+    auto apply_scissor = [](const VkRect2D& sc) {
         glEnable(GL_SCISSOR_TEST);
         const GLint x = static_cast<GLint>(sc.offset.x);
+        const GLint y = static_cast<GLint>(sc.offset.y);
         const GLsizei w = static_cast<GLsizei>(sc.extent.width);
         const GLsizei h = static_cast<GLsizei>(sc.extent.height);
-        const GLint y = static_cast<GLint>(target_h) - static_cast<GLint>(sc.offset.y + sc.extent.height);
-        glScissor(x, std::max(0, y), std::max(0, w), std::max(0, h));
+        glScissor(std::max(0, x), std::max(0, y), std::max(0, w), std::max(0, h));
     };
 
     for (const auto& cmd : cmds) {
@@ -1238,7 +1236,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
             apply_pipeline_state(key, true);
             apply_uniforms(uniforms_for(key, true), st);
             apply_texture(st.set);
-            apply_scissor(st.scissor, target.height);
+            apply_scissor(st.scissor);
             glBindVertexArray(lines_vao_);
             glBindBuffer(GL_ARRAY_BUFFER, lb->gl_buffer());
             const std::size_t off = static_cast<std::size_t>(cmd.first) * sizeof(LineInstance);
@@ -1261,7 +1259,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
             apply_pipeline_state(key, false);
             apply_uniforms(uniforms_for(key, false), st);
             apply_texture(st.set);
-            apply_scissor(st.scissor, target.height);
+            apply_scissor(st.scissor);
             glBindVertexArray(geom_vao_);
             glBindBuffer(GL_ARRAY_BUFFER, vb.gl_buffer());
             glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(kVertexBytes), reinterpret_cast<const void*>(0));

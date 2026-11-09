@@ -12,16 +12,14 @@ namespace dream::render::vk {
 
 namespace {
 
-constexpr std::uint32_t kMaxTextures = 2048;
-
-GLenum filter_for(std::uint32_t tsp, bool min_filter) {
+GLenum filter_for(std::uint32_t tsp, bool min_filter, bool mipmapped) {
     const bool bilinear = tsp_filter_mode(tsp) != 0;
-    const bool mipmapped = tsp_filter_mode(tsp) >= 2;
-    if (!min_filter)
+    if (!min_filter || !mipmapped)
         return bilinear ? GL_LINEAR : GL_NEAREST;
+    const bool trilinear = tsp_filter_mode(tsp) >= 2;
     if (bilinear)
-        return mipmapped ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR_MIPMAP_NEAREST;
-    return mipmapped ? GL_NEAREST_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST;
+        return trilinear ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR_MIPMAP_NEAREST;
+    return trilinear ? GL_NEAREST_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST;
 }
 
 GLenum wrap_for(bool clamp, bool flip, bool tiled) {
@@ -186,16 +184,17 @@ std::size_t TextureCache::invalidate_range(std::uint32_t begin, std::uint32_t en
     return doomed.size();
 }
 
-std::uint32_t TextureCache::sampler_for(std::uint32_t tsp, bool tiled) {
-    const std::uint32_t key = (tsp & 0x7FFFFu) | (tiled ? 0x80000u : 0);
+std::uint32_t TextureCache::sampler_for(std::uint32_t tsp, bool tiled, bool mipmapped) {
+    const std::uint32_t key =
+        (tsp & 0x7FFFFu) | (tiled ? 0x80000u : 0u) | (mipmapped ? 0x100000u : 0u);
     const auto it = samplers_.find(key);
     if (it != samplers_.end())
         return it->second;
 
     GLuint sampler = 0;
     glGenSamplers(1, &sampler);
-    glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, filter_for(tsp, false));
-    glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, filter_for(tsp, true));
+    glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, filter_for(tsp, false, mipmapped));
+    glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, filter_for(tsp, true, mipmapped));
 
     const bool clamp_u = tsp_clamp_u(tsp);
     const bool clamp_v = tsp_clamp_v(tsp);
@@ -252,7 +251,7 @@ VkDescriptorSet TextureCache::rtt_set(std::uint32_t tcw, std::uint32_t tsp, bool
     if (it == rtt_.end())
         return 0;
 
-    const std::uint32_t sampler = sampler_for(tsp, tiled);
+    const std::uint32_t sampler = sampler_for(tsp, tiled, false);
     return (static_cast<std::uint64_t>(sampler) << 32) | static_cast<std::uint64_t>(it->second.tex);
 }
 
@@ -261,18 +260,21 @@ void TextureCache::capture_rtt(VkCommandBuffer, VkImage, std::uint32_t src_w, st
     if (width == 0 || height == 0 || !ctx_)
         return;
 
+    width = std::min(width, 640u);
+    height = std::min(height, 480u);
     const auto next_pot = [](std::uint32_t v) {
-        std::uint32_t p = 1;
-        while (p < v) p <<= 1;
+        std::uint32_t p = 8;
+        while (p < v && p < 1024) p <<= 1;
         return p;
     };
     const std::uint32_t pw = next_pot(width);
     const std::uint32_t ph = next_pot(height);
-    const auto scaled = [src_w](std::uint32_t v) {
-        return (v * src_w + 639u) / 640u;
+    const double scale = static_cast<double>(src_h) / 480.0;
+    const auto scaled = [&](std::uint32_t v) {
+        return std::max<std::uint32_t>(1u, static_cast<std::uint32_t>(v * scale + 0.5));
     };
-    const std::uint32_t iw = next_pot(scaled(width));
-    const std::uint32_t ih = next_pot(scaled(height));
+    const std::uint32_t iw = scaled(pw);
+    const std::uint32_t ih = scaled(ph);
 
     bool fresh = false;
     auto it = rtt_.find(address);
@@ -387,7 +389,7 @@ VkDescriptorSet TextureCache::get(VkCommandBuffer cmd, std::uint32_t tcw, std::u
     auto it = entries_.find(key);
     if (it != entries_.end()) {
         it->second.last_frame = frame_;
-        const std::uint32_t sampler = sampler_for(tsp, tiled);
+        const std::uint32_t sampler = sampler_for(tsp, tiled, it->second.info.mipmapped);
         return (static_cast<std::uint64_t>(sampler) << 32) | static_cast<std::uint64_t>(it->second.tex);
     }
 
@@ -442,7 +444,7 @@ VkDescriptorSet TextureCache::get(VkCommandBuffer cmd, std::uint32_t tcw, std::u
     }
 
     e.last_frame = frame_;
-    const std::uint32_t sampler = sampler_for(tsp, tiled);
+    const std::uint32_t sampler = sampler_for(tsp, tiled, e.info.mipmapped);
     const VkDescriptorSet set = (static_cast<std::uint64_t>(sampler) << 32) |
                                 static_cast<std::uint64_t>(e.tex);
     entries_.emplace(key, std::move(e));

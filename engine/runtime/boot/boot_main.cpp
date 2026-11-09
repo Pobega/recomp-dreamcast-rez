@@ -165,6 +165,16 @@ struct Live {
         target_size(scale_, render_aspect, w, h);
     }
 
+    struct ScopedGlContext {
+        dream::render::vk::Window& win;
+        explicit ScopedGlContext(dream::render::vk::Window& w) : win(w) {
+            win.acquire_gl_context();
+        }
+        ~ScopedGlContext() {
+            win.release_gl_context();
+        }
+    };
+
     // Rebuilds the render target(s) at a new shape (Expanded aspect follows the
     // window). On the guest thread at a vblank: the device is idled, the old frame is not shown
     // again, and the next render fills the new target.
@@ -188,7 +198,7 @@ struct Live {
         target_size(render_aspect_, w, h);
         if (w == offscreen.width() && h == offscreen.height())
             return;
-        window.acquire_gl_context();
+        ScopedGlContext gl_ctx(window);
         glFinish();
         // The presenter's sets name the old views by handle; the new ones may reuse the values.
         presenter.forget_views();
@@ -219,8 +229,6 @@ struct Live {
         await_render = true;
         std::printf("window: render target now %ux%u (aspect %.3f)\n", w, h,
                     static_cast<double>(render_aspect_));
-        if (threaded_)
-            window.release_gl_context();
     }
 
     bool start(unsigned scale, const std::string& title, float render_aspect = 0.0f,
@@ -342,8 +350,11 @@ struct Live {
             hand_over(nullptr);
             return;
         }
-        draw(decoder.frame(), pvr_.render_regs(),
-             [this](auto&& f) { memory_.take_vram_dirty(std::forward<decltype(f)>(f)); });
+        {
+            ScopedGlContext gl_ctx(window);
+            draw(decoder.frame(), pvr_.render_regs(),
+                 [this](auto&& f) { memory_.take_vram_dirty(std::forward<decltype(f)>(f)); });
+        }
     }
 
     static bool frames_offthread() {
@@ -892,18 +903,7 @@ public:
             }
             drain();
         }
-        struct SynchronousContext {
-            dream::render::vk::Window& win;
-            bool active;
-            SynchronousContext(dream::render::vk::Window& w, bool act) : win(w), active(act) {
-                if (active)
-                    win.acquire_gl_context();
-            }
-            ~SynchronousContext() {
-                if (active)
-                    win.release_gl_context();
-            }
-        } sync_ctx(window, threaded_);
+        ScopedGlContext gl_ctx(window);
         if (interpolate && interp_ready && from_renderer && !offscreen.readback && !show_fps &&
             !menu.is_open() && !overlay_up) {
             interp_ready = false;

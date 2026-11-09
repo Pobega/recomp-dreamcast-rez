@@ -23,7 +23,7 @@ public:
     void flush(std::size_t offset, std::size_t bytes);
     void destroy();
 
-    void upload_to_target(std::uint32_t gl_target);
+    void upload_to_target(std::uint32_t gl_target, std::size_t active_bytes = 0);
 
     VkBuffer handle() const noexcept;
     const void* mapped() const noexcept { return storage_.empty() ? nullptr : storage_.data(); }

@@ -213,7 +213,6 @@ void Window::release_gl_context() noexcept {
 }
 
 bool Window::begin_frame(std::uint32_t& image_index, VkCommandBuffer& cmd) {
-    acquire_gl_context();
     int dw = 0, dh = 0;
     SDL_GL_GetDrawableSize(window_, &dw, &dh);
     extent_ = {static_cast<std::uint32_t>(dw), static_cast<std::uint32_t>(dh)};
@@ -461,7 +460,16 @@ bool Window::poll() {
     }
 
 #if defined(__linux__)
-    const bool ev_start_down = (input_buttons_ & (1u << (BTN_START - BTN_SOUTH))) != 0;
+    bool has_open_controller = false;
+    for (SDL_Gamepad* g : pads_) {
+        if (g) {
+            has_open_controller = true;
+            break;
+        }
+    }
+    const bool ev_start_down = (!has_open_controller && input_fd_ >= 0)
+                                   ? ((input_buttons_ & (1u << (BTN_START - BTN_SOUTH))) != 0)
+                                   : false;
 #else
     const bool ev_start_down = false;
 #endif
@@ -520,19 +528,44 @@ bool Window::poll() {
             }
 
 #if defined(__linux__)
-            if (p == 0 && input_fd_ >= 0) {
+            if (p == 0 && !has_open_controller && input_fd_ >= 0) {
+                constexpr float kDeadzone = 0.2f;
                 switch (static_cast<PadControl>(c)) {
                     case PadControl::Up:
-                        if (g_dpad_up || input_hat_y_ < 0 || g_stick_y < -0.3f) { now = true; val = 1.0f; }
+                        if (g_dpad_up || input_hat_y_ < 0) { now = true; val = 1.0f; }
                         break;
                     case PadControl::Down:
-                        if (g_dpad_down || input_hat_y_ > 0 || g_stick_y > 0.3f) { now = true; val = 1.0f; }
+                        if (g_dpad_down || input_hat_y_ > 0) { now = true; val = 1.0f; }
                         break;
                     case PadControl::Left:
-                        if (g_dpad_left || input_hat_x_ < 0 || g_stick_x < -0.3f) { now = true; val = 1.0f; }
+                        if (g_dpad_left || input_hat_x_ < 0) { now = true; val = 1.0f; }
                         break;
                     case PadControl::Right:
-                        if (g_dpad_right || input_hat_x_ > 0 || g_stick_x > 0.3f) { now = true; val = 1.0f; }
+                        if (g_dpad_right || input_hat_x_ > 0) { now = true; val = 1.0f; }
+                        break;
+                    case PadControl::StickUp:
+                        if (g_stick_y < -kDeadzone) {
+                            now = true;
+                            val = std::max(val, (-g_stick_y - kDeadzone) / (1.0f - kDeadzone));
+                        }
+                        break;
+                    case PadControl::StickDown:
+                        if (g_stick_y > kDeadzone) {
+                            now = true;
+                            val = std::max(val, (g_stick_y - kDeadzone) / (1.0f - kDeadzone));
+                        }
+                        break;
+                    case PadControl::StickLeft:
+                        if (g_stick_x < -kDeadzone) {
+                            now = true;
+                            val = std::max(val, (-g_stick_x - kDeadzone) / (1.0f - kDeadzone));
+                        }
+                        break;
+                    case PadControl::StickRight:
+                        if (g_stick_x > kDeadzone) {
+                            now = true;
+                            val = std::max(val, (g_stick_x - kDeadzone) / (1.0f - kDeadzone));
+                        }
                         break;
                     case PadControl::A:
                         if (input_buttons_ & (1u << (BTN_SOUTH - BTN_SOUTH))) { now = true; val = 1.0f; }
@@ -551,12 +584,14 @@ bool Window::poll() {
                         break;
                     case PadControl::LeftTrigger:
                         if ((input_buttons_ & (1u << (BTN_TL - BTN_SOUTH))) || g_l2_btn || input_l2_ > 128) {
-                            now = true; val = 1.0f;
+                            now = true;
+                            val = (input_l2_ > 128) ? static_cast<float>(input_l2_) / 255.0f : 1.0f;
                         }
                         break;
                     case PadControl::RightTrigger:
                         if ((input_buttons_ & (1u << (BTN_TR - BTN_SOUTH))) || g_r2_btn || input_r2_ > 128) {
-                            now = true; val = 1.0f;
+                            now = true;
+                            val = (input_r2_ > 128) ? static_cast<float>(input_r2_) / 255.0f : 1.0f;
                         }
                         break;
                     default:

@@ -15,12 +15,13 @@ cp portmaster/Rez.sh "$PKG/Rez.sh"
 chmod +x "$PKG/Rez.sh"
 
 STRIP=""
-for cand in llvm-strip "$PWD/build-portmaster/toolchain/bin/aarch64-nextui-linux-gnu-strip" "$PWD/build-brick/toolchain/bin/aarch64-nextui-linux-gnu-strip" aarch64-linux-gnu-strip strip; do
+for cand in llvm-strip "$PWD/build-portmaster/toolchain/bin/aarch64-nextui-linux-gnu-strip" "$PWD/build-brick/toolchain/bin/aarch64-nextui-linux-gnu-strip" aarch64-linux-gnu-strip; do
     if command -v "$cand" >/dev/null 2>&1 || [ -x "$cand" ]; then
         STRIP="$cand"
         break
     fi
 done
+[ -n "$STRIP" ] || { echo "package: no compatible aarch64 strip tool found"; exit 3; }
 "$STRIP" -o "$PKG/rez/rez" "$EXE"
 chmod +x "$PKG/rez/rez"
 

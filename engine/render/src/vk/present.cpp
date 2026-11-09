@@ -19,8 +19,8 @@ out vec2 v_uv;
 
 void main() {
     v_uv = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-    const vec2 pos = v_uv * 2.0 - 1.0;
-    const vec2 p = pos * u_scale + u_offset;
+    vec2 pos = v_uv * 2.0 - 1.0;
+    vec2 p = pos * u_scale + u_offset;
     gl_Position = vec4(p.x, -p.y, 0.0, 1.0);
 }
 )";
@@ -44,13 +44,13 @@ const int kMaxTaps = 4;
 void main() {
     if (any(lessThan(v_uv, vec2(0.0))) || any(greaterThan(v_uv, vec2(1.0))))
         discard;
-    const ivec2 n = ivec2(clamp(ceil(u_taps - 0.05), vec2(1.0), vec2(float(kMaxTaps))));
+    ivec2 n = ivec2(clamp(ceil(u_taps - 0.05), vec2(1.0), vec2(float(kMaxTaps))));
     if (n.x == 1 && n.y == 1) {
-        const vec4 t = texture(u_image, v_uv);
+        vec4 t = texture(u_image, v_uv);
         colour = u_mode.x > 0.5 ? t : vec4(t.rgb, 1.0);
         return;
     }
-    const vec2 first = v_uv - 0.5 * (vec2(n) - 1.0) * u_texel;
+    vec2 first = v_uv - 0.5 * (vec2(n) - 1.0) * u_texel;
     vec4 sum = vec4(0.0);
     for (int y = 0; y < n.y; ++y)
         for (int x = 0; x < n.x; ++x)
@@ -273,6 +273,7 @@ bool Presenter::draw_view(VkCommandBuffer, VkImageView view, std::uint32_t width
     }
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
+    glDisable(GL_SCISSOR_TEST);
 
     glBindVertexArray(vao_);
     glDrawArrays(GL_TRIANGLES, 0, 3);

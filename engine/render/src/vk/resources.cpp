@@ -40,11 +40,13 @@ void HostBuffer::write(const void* data, std::size_t bytes, std::size_t offset) 
 void HostBuffer::flush(std::size_t, std::size_t) {
 }
 
-void HostBuffer::upload_to_target(std::uint32_t gl_target) {
+void HostBuffer::upload_to_target(std::uint32_t gl_target, std::size_t active_bytes) {
     if (!gl_buf_)
         glGenBuffers(1, &gl_buf_);
     glBindBuffer(gl_target, gl_buf_);
-    glBufferData(gl_target, static_cast<GLsizeiptr>(storage_.size()), storage_.data(), GL_DYNAMIC_DRAW);
+    const std::size_t upload_size =
+        (active_bytes > 0 && active_bytes <= storage_.size()) ? active_bytes : storage_.size();
+    glBufferData(gl_target, static_cast<GLsizeiptr>(upload_size), storage_.data(), GL_DYNAMIC_DRAW);
 }
 
 void HostBuffer::destroy() {

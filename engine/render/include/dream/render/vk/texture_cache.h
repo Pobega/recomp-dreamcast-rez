@@ -78,7 +78,7 @@ private:
     std::uint64_t frame_ = 1;
 
     void free_entry(Entry& e);
-    std::uint32_t sampler_for(std::uint32_t tsp, bool tiled);
+    std::uint32_t sampler_for(std::uint32_t tsp, bool tiled, bool mipmapped);
     bool upload(VkCommandBuffer cmd, Entry& entry, const std::vector<std::uint32_t>& pixels,
                 std::uint32_t width, std::uint32_t height,
                 const std::vector<std::vector<std::uint32_t>>* mips = nullptr);
