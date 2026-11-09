@@ -173,12 +173,20 @@ void add_texture_flags(std::vector<std::string>& args, const std::filesystem::pa
 bool expanded_aspect() {
     if (!g_port || !g_port->widescreen)
         return false;
-    const std::string a = g_settings.get("aspect", "expanded");
+    const std::string a = g_settings.get("aspect");
     if (a == "original" || a == "4:3")
         return false;
-    if (g_settings.get("aspect").empty() && !g_settings.get("widescreen").empty())
+    if (!a.empty())
+        return true;
+    if (!g_settings.get("widescreen").empty())
         return g_settings.get_bool("widescreen", true);
-    return true;
+    return scale_setting() == kScalePanel;
+}
+
+float current_panel_aspect() {
+    int w = 0, h = 0;
+    render_size(render_scale(), w, h);
+    return (w > 0 && h > 0) ? static_cast<float>(w) / static_cast<float>(h) : 0.0f;
 }
 
 // The shape in effect now: 4:3, or with Expanded the window's (clamped to what the port has been
@@ -473,6 +481,15 @@ public:
         // (include/dreamcomp/sharp2d.h).
         sharp_2d_ = g_settings.get_bool("sharp_2d", true);
         apply_presentation();
+        if (expanded_aspect()) {
+            const float pa = current_panel_aspect();
+            g_aspect_now = expanded_target(pa > 0.0f ? pa : 0.0f);
+        } else {
+            g_aspect_now = 4.0f / 3.0f;
+        }
+        auto& hc = dream::host::host_controls();
+        if (g_port && g_port->widescreen_anamorphic && hc.set_render_aspect)
+            hc.set_render_aspect(g_aspect_now);
         if (g_port && g_port->on_start)
             g_port->on_start(sys, g_settings);
         std::printf("rez: %s, settings %s%s\n", g_port && g_port->title ? g_port->title : "?",
@@ -487,8 +504,11 @@ public:
         if (!g_port || !g_port->widescreen)
             return;
         auto& hc = dream::host::host_controls();
+        const float win_a = (render_scale() == kScalePanel)
+                                ? current_panel_aspect()
+                                : (hc.window_aspect ? hc.window_aspect() : 0.0f);
         const float want = expanded_aspect()
-                               ? expanded_target(hc.window_aspect ? hc.window_aspect() : 0.0f)
+                               ? expanded_target(win_a)
                                : 4.0f / 3.0f;
         if (std::fabs(want - g_aspect_now) < 0.005f) {
             settle_ = 0;
@@ -787,6 +807,14 @@ void set_render_scale(int scale) {
         hc.set_render_scale(static_cast<unsigned>(scale));
     int w = 0, h = 0;
     render_size(scale, w, h);
+    if (g_port && g_port->widescreen) {
+        const float want = (expanded_aspect() && w > 0 && h > 0)
+                               ? expanded_target(static_cast<float>(w) / static_cast<float>(h))
+                               : 4.0f / 3.0f;
+        g_aspect_now = want;
+        if (g_port->widescreen_anamorphic && hc.set_render_aspect)
+            hc.set_render_aspect(want);
+    }
     std::printf("rez: drawing at %dx%d from the next frame\n", w, h);
 }
 

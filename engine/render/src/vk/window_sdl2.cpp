@@ -166,8 +166,21 @@ bool Window::create(const char* title, int width, int height) {
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
-    const Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | (fullscreen_ ? SDL_WINDOW_FULLSCREEN : 0);
-    window_ = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height, flags);
+    constexpr int kMaxHandheldWidth = 1280;
+    constexpr int kMaxHandheldHeight = 800;
+
+    SDL_DisplayMode dm{};
+    const bool has_dm = (SDL_GetCurrentDisplayMode(0, &dm) == 0 && dm.w > 0 && dm.h > 0);
+    const bool use_fullscreen =
+        has_dm && (fullscreen_ || width >= dm.w || height >= dm.h ||
+                   (dm.w <= kMaxHandheldWidth && dm.h <= kMaxHandheldHeight));
+
+    const int win_w = use_fullscreen ? dm.w : width;
+    const int win_h = use_fullscreen ? dm.h : height;
+    const Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | (use_fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    window_ = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_w, win_h, flags);
+    if (use_fullscreen)
+        fullscreen_ = true;
     if (!window_) {
         error_ = SDL_GetError();
         return false;

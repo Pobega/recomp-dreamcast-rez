@@ -238,15 +238,19 @@ struct Live {
     // kScalePanel: the largest 4:3 picture the window's own pixels hold, so the presenter copies
     // one pixel to one pixel.
     void target_size(unsigned scale, float render_aspect, std::uint32_t& w, std::uint32_t& h) const {
-        const float wide = render_aspect > 0.0f ? render_aspect / (4.0f / 3.0f) : 1.0f;
         if (scale == dream::host::HostControls::kScalePanel) {
             int pw = 0, ph = 0;
             window.pixel_size(pw, ph);
-            h = static_cast<std::uint32_t>(std::max(kGuestHeight / 2, std::min<std::uint32_t>(
-                static_cast<std::uint32_t>(std::max(ph, 1)), static_cast<std::uint32_t>(std::max(pw, 1)) * 3 / 4)));
-            w = static_cast<std::uint32_t>(static_cast<float>(h) * (4.0f / 3.0f) * wide + 0.5f);
+            if (pw > 0 && ph > 0 && !(pw == static_cast<int>(kGuestWidth) && ph == static_cast<int>(kGuestHeight))) {
+                w = static_cast<std::uint32_t>(pw);
+                h = static_cast<std::uint32_t>(ph);
+            } else {
+                w = kDefaultWidePanelWidth;
+                h = kDefaultWidePanelHeight;
+            }
             return;
         }
+        const float wide = render_aspect > 0.0f ? render_aspect / (4.0f / 3.0f) : 1.0f;
         w = static_cast<std::uint32_t>(static_cast<float>(kGuestWidth * scale) * wide + 0.5f);
         h = kGuestHeight * scale;
     }
@@ -285,6 +289,8 @@ struct Live {
             scale_ = want_scale;
         std::uint32_t w = 0, h = 0;
         target_size(render_aspect_, w, h);
+        if (scale_ == dream::host::HostControls::kScalePanel && w > 0 && h > 0)
+            render_aspect_ = want_render_aspect = static_cast<float>(w) / static_cast<float>(h);
         if (w == offscreen.width() && h == offscreen.height())
             return;
         ScopedGlContext gl_ctx(window);
@@ -329,14 +335,16 @@ struct Live {
         // screen, but its view is squeezed horizontally; drawing it into a target that is wider
         // by the same factor keeps the horizontal resolution of a native wide render.
         const std::uint32_t win_w = static_cast<std::uint32_t>(720.0f * (render_aspect > 0.0f ? render_aspect : 4.0f / 3.0f));
+        if (fullscreen)
+            window.set_fullscreen(true);
         if (!window.create(title.c_str(), win_w, 720)) {
             error = window.error();
             return false;
         }
-        if (fullscreen)
-            window.set_fullscreen(true);
         std::uint32_t w = 0, h = 0;  // after the window: kScalePanel takes its size
         target_size(render_aspect, w, h);
+        if (scale_ == dream::host::HostControls::kScalePanel && w > 0 && h > 0)
+            render_aspect = render_aspect_ = want_render_aspect = static_cast<float>(w) / static_cast<float>(h);
         if (!offscreen.create(window.context(), w, h)) {
             error = offscreen.error();
             return false;
@@ -1455,6 +1463,7 @@ public:
     }
 
     static constexpr std::uint32_t kGuestWidth = 640, kGuestHeight = 480;
+    static constexpr std::uint32_t kDefaultWidePanelWidth = 720, kDefaultWidePanelHeight = 480;
 
     dream::render::vk::Window window;
     dream::render::vk::Renderer renderer;
@@ -2240,6 +2249,11 @@ int main(int argc, char** argv) {
                 lp->target_size(sc, lp->render_aspect_, tw, th);
                 w = tw, h = th;
             };
+            hc.window_aspect = [lp] {
+                const VkExtent2D e = lp->window.extent();
+                return e.height ? static_cast<float>(e.width) / static_cast<float>(e.height) : 0.0f;
+            };
+            hc.set_render_aspect = [lp](float a) { lp->want_render_aspect = a; };
         }
         if (!live->overlays.empty()) {
             live->window.set_escape_quits(false);
@@ -2262,11 +2276,6 @@ int main(int argc, char** argv) {
             hc.set_rumble = [lp](float v) { lp->window.rumble_scale = std::clamp(v, 0.0f, 1.0f); };
             hc.set_fullscreen = [lp](bool on) { lp->window.set_fullscreen(on); };
             hc.fullscreen = [lp] { return lp->window.fullscreen(); };
-            hc.window_aspect = [lp] {
-                const VkExtent2D e = lp->window.extent();
-                return e.height ? static_cast<float>(e.width) / static_cast<float>(e.height) : 0.0f;
-            };
-            hc.set_render_aspect = [lp](float a) { lp->want_render_aspect = a; };
             hc.bindings_path = [lp] { return lp->bindings_path; };
             hc.reload_bindings = [lp] { lp->load_bindings(); };
             hc.set_volume = [&volume_percent](float v) {

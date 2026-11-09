@@ -7,14 +7,23 @@
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <string>
 
 #include "dream/runtime/sh4/abi.h"
 #include "dream/runtime/sh4/cost.h"
 #include "dream/runtime/sh4/ctx.h"
 #include "dreamcomp/hook.h"
 #include "dreamcomp/port.h"
+#include "dreamcomp/settings.h"
+#include "native_sys.h"
 
 namespace rez {
+
+constexpr std::uint32_t kSet1 = 0x8C303BC8u;
+constexpr std::uint32_t kSet0Getter = 0x8C301464u, kSet0Setter = 0x8C30146Au;
+constexpr std::uint32_t kSubpanelOpenReturnAddr = 0x8C3015CEu;
+constexpr unsigned kSetWords = 20;
+
 namespace {
 
 constexpr std::uint32_t kMenu = 0x8C3042BCu;  // nine 32-byte entries
@@ -41,6 +50,10 @@ constexpr Text kHead{0x8C30385Cu, "up/down", "recomp"};
 constexpr Text k640{0x8C303974u, "heads up display", "640x480"};
 char g_high[14] = "1280x960";  // the higher choice's size, at most as long as "point display"
 constexpr Text k1280{0x8C3039C8u, "point display", g_high};
+constexpr Text kFpsRow{0x8C303898u, "shot button", "frame rate"};
+constexpr Text kFpsHead{0x8C303E20u, "heads up display", "frame rate"};
+constexpr Text k30Fps{0x8C303DACu, "normal", "30 fps"};
+constexpr Text k60Fps{0x8C303DBCu, "reverse", "60 fps"};
 
 constexpr unsigned kRowCount = 17, kRowWords = kRowBytes / 4;
 
@@ -48,7 +61,7 @@ bool g_on = true, g_page = false, g_menu = false;
 std::uint32_t g_menu_state = 0;              // the menu's state, from recomp_menu_begin to _end
 std::uint32_t g_table[9][8];                 // the menu table as the game has it, while reordered
 std::uint32_t g_rows[kRowCount][kRowWords];  // the options rows, while the page is open
-std::uint32_t g_set0[18], g_heading[6];
+std::uint32_t g_set0[18], g_set1[kSetWords], g_heading[6];
 
 bool text_is(dream::Memory& m, std::uint32_t a, const char* s) {
     for (std::size_t i = 0;; ++i) {
@@ -75,7 +88,9 @@ bool overlay_as_read(dream::Memory& m) {
             return false;
     if (!text_is(m, kSoundMode.at, kSoundMode.original) || !text_is(m, kSoundModeHead.at, kSoundModeHead.original) ||
         !text_is(m, kHead.at, kHead.original) || !text_is(m, k640.at, k640.original) ||
-        !text_is(m, k1280.at, k1280.original))
+        !text_is(m, k1280.at, k1280.original) || !text_is(m, kFpsRow.at, kFpsRow.original) ||
+        !text_is(m, kFpsHead.at, kFpsHead.original) || !text_is(m, k30Fps.at, k30Fps.original) ||
+        !text_is(m, k60Fps.at, k60Fps.original))
         return false;
     if (!text_is(m, kTitle.at, kTitle.original) && !text_is(m, kTitle.at, kTitle.page))
         return false;
@@ -83,21 +98,23 @@ bool overlay_as_read(dream::Memory& m) {
 }
 
 // The page is the options screen with the heading "recomp settings", row 0 "resolution" (sound
-// mode's row, choice set 0: "640x480" or the higher size) and row 16 "return" as they were, and the
-// rows between empty like the original's separators. The new words overwrite labels of rows the
-// page hides.
+// mode's row, choice set 0: "640x480" or the higher size), row 1 "frame rate" (choice set 1:
+// "30 fps" or "60 fps"), and row 16 "return" as they were, and the rows between empty like the
+// original's separators. The new words overwrite labels of rows the page hides.
 void page_open(dream::Memory& m) {
     for (unsigned r = 0; r < kRowCount; ++r)
         for (unsigned w = 0; w < kRowWords; ++w) g_rows[r][w] = m.read32(kRows + r * kRowBytes + 4 * w);
     for (unsigned i = 0; i < 6; ++i) g_heading[i] = m.read32(kHeading + 4 * i);
     for (unsigned i = 0; i < 18; ++i) g_set0[i] = m.read32(kSet0 + 4 * i);
+    for (unsigned i = 0; i < kSetWords; ++i) g_set1[i] = m.read32(kSet1 + 4 * i);
     int w = 0, h = 0;
     dreamcomp::render_size(dreamcomp::render_scale_high(), w, h);
     char size[32];
     const int len = w > 0 && h > 0 ? std::snprintf(size, sizeof size, "%dx%d", w, h) : 0;
     if (len > 0 && static_cast<std::size_t>(len) < sizeof g_high)
         std::memcpy(g_high, size, static_cast<std::size_t>(len) + 1);
-    for (const Text& t : {kSoundMode, kSoundModeHead, kTitle, kHead, k640, k1280}) write_text(m, t.at, t.page);
+    for (const Text& t : {kSoundMode, kSoundModeHead, kTitle, kHead, k640, k1280, kFpsRow, kFpsHead, k30Fps, k60Fps})
+        write_text(m, t.at, t.page);
     for (unsigned r = 1; r + 1 < kRowCount; ++r)
         for (unsigned word = 0; word < kRowWords; ++word) m.write32(kRows + r * kRowBytes + 4 * word, 0);
     for (unsigned i = 0; i < 6; ++i) {
@@ -106,10 +123,19 @@ void page_open(dream::Memory& m) {
         m.write32(kSet0 + 4 * i, kSoundModeHead.at);
         m.write32(kSet0 + 24 + 4 * i, k640.at);
         m.write32(kSet0 + 48 + 4 * i, k1280.at);
+        m.write32(kRows + kRowBytes + 4 * i, kFpsRow.at);
+        m.write32(kSet1 + 4 * i, kFpsHead.at);
+        m.write32(kSet1 + 24 + 4 * i, k30Fps.at);
+        m.write32(kSet1 + 48 + 4 * i, k60Fps.at);
     }
+    m.write32(kRows + kRowBytes + 24, 1u);
+    m.write32(kRows + kRowBytes + 36, 1u);
+    m.write32(kSet1 + 72, kSet0Getter);
+    m.write32(kSet1 + 76, kSet0Setter);
     g_page = true;
     dreamcomp::render_size(dreamcomp::render_scale(), w, h);
-    std::printf("rez: recomp settings opened (drawing at %dx%d; the choices 640x480 and %s)\n", w, h, g_high);
+    std::printf("rez: recomp settings opened (drawing at %dx%d, %u fps; choices 640x480 and %s, 30 and 60 fps)\n",
+                w, h, rez::native_sys_get_frame_rate(), g_high);
 }
 
 void page_close(dream::Memory& m) {
@@ -117,7 +143,9 @@ void page_close(dream::Memory& m) {
         for (unsigned w = 0; w < kRowWords; ++w) m.write32(kRows + r * kRowBytes + 4 * w, g_rows[r][w]);
     for (unsigned i = 0; i < 6; ++i) m.write32(kHeading + 4 * i, g_heading[i]);
     for (unsigned i = 0; i < 18; ++i) m.write32(kSet0 + 4 * i, g_set0[i]);
-    for (const Text& t : {kSoundMode, kSoundModeHead, kTitle, kHead, k640, k1280}) write_text(m, t.at, t.original);
+    for (unsigned i = 0; i < kSetWords; ++i) m.write32(kSet1 + 4 * i, g_set1[i]);
+    for (const Text& t : {kSoundMode, kSoundModeHead, kTitle, kHead, k640, k1280, kFpsRow, kFpsHead, k30Fps, k60Fps})
+        write_text(m, t.at, t.original);
     g_page = false;
 }
 
@@ -182,7 +210,7 @@ void recomp_menu_end(dream::Memory& m) {
 }  // namespace rez
 
 // 0x8C301464 (set 0's getter, the sound mode's, a trampoline to 0x8C3010DC that only this panel
-// calls): while the page is open, the resolution choice (0: 640x480, 1: any other) instead.
+// calls): while the page is open, either resolution choice (set 0) or frame rate choice (set 1).
 DC_HOOK_ENTRY(recomp_get) {
     if (!rez::g_page)
         return false;
@@ -190,13 +218,17 @@ DC_HOOK_ENTRY(recomp_get) {
         c.pc = 0x8C301464u;
         dream::sh4::deliver_irq(c, m);
     }
-    c.r[0] = dreamcomp::render_scale() != 1 ? 1u : 0u;
+    const std::uint32_t set_addr = (c.pr == rez::kSubpanelOpenReturnAddr) ? c.r[14] : c.r[4];
+    if (set_addr == rez::kSet1)
+        c.r[0] = rez::native_sys_get_frame_rate() == 60 ? 1u : 0u;
+    else
+        c.r[0] = dreamcomp::render_scale() != 1 ? 1u : 0u;
     c.cycles += dream::sh4::cost(8);
     return true;
 }
 
 // 0x8C30146A (set 0's setter, likewise a trampoline to 0x8C3010E6; r4 the choice): while the page
-// is open, sets the resolution, saved and applied from the next frame.
+// is open, sets resolution or frame rate, saved and applied from the next frame.
 DC_HOOK_ENTRY(recomp_set) {
     if (!rez::g_page)
         return false;
@@ -204,7 +236,14 @@ DC_HOOK_ENTRY(recomp_set) {
         c.pc = 0x8C30146Au;
         dream::sh4::deliver_irq(c, m);
     }
-    dreamcomp::set_render_scale(c.r[4] ? dreamcomp::render_scale_high() : 1);
+    if (c.r[14] == rez::kSet1) {
+        const unsigned fps = c.r[4] ? 60u : 30u;
+        rez::native_sys_frame_rate(fps);
+        dreamcomp::settings().set("frame_rate", std::to_string(fps));
+        dreamcomp::settings().save();
+    } else {
+        dreamcomp::set_render_scale(c.r[4] ? dreamcomp::render_scale_high() : 1);
+    }
     c.cycles += dream::sh4::cost(8);
     return true;
 }

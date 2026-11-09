@@ -29,6 +29,10 @@ void native_sys_frame_rate(unsigned fps) {
     std::printf("rez: %u fps\n", g_frame_rate);
 }
 
+unsigned native_sys_get_frame_rate() {
+    return g_frame_rate;
+}
+
 void native_sys_start(dream::System& sys) {
     g_sys = &sys;
 }
@@ -81,13 +85,14 @@ bool vsync_wait_pass(dream::sh4::Ctx& c, dream::Memory& m) {
 // [0x8C28E07C] steps, moved one a frame toward this target: 1 in the menus, 2 in the stages. At
 // 60 fps the hook stores at most 1, so every step is drawn; at 30 the setter runs as written.
 bool set_frame_steps(dream::sh4::Ctx& c, dream::Memory& m) {
-    if (g_frame_rate != 60 || !g_sys)
+    if (!g_sys)
         return false;
     if (c.cycles >= c.next_event) {
         c.pc = 0x8C0D06E4u;
         dream::sh4::deliver_irq(c, m);
     }
-    const std::uint32_t want = c.r[4], use = want > 1 ? 1 : want;
+    const std::uint32_t want = c.r[4];
+    const std::uint32_t use = (g_frame_rate == 60 && want > 1) ? 1u : want;
     c.r[1] = 0x8C28E080u;
     c.cycles += dream::sh4::cost(3);
     m.write32(c.r[1], use);

@@ -12,5 +12,6 @@ void native_sys_start(dream::System& sys);
 
 // 60 (the default: every logic step drawn) or 30 (the original's pacing in the stages).
 void native_sys_frame_rate(unsigned fps);
+unsigned native_sys_get_frame_rate();
 
 }  // namespace rez

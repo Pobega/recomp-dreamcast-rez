@@ -27,8 +27,12 @@ namespace {
 bool g_widescreen = false;
 float g_aspect = 4.0f / 3.0f;
 
+constexpr float kOriginalAspect = 4.0f / 3.0f;
+constexpr float kWidescreenEpsilon = 0.01f;
+
 void widescreen(dream::System&, float aspect) {
     g_aspect = aspect;
+    g_widescreen = aspect > kOriginalAspect + kWidescreenEpsilon;
 }
 
 const dreamcomp::PortInfo kInfo = [] {
@@ -46,8 +50,8 @@ const dreamcomp::PortInfo kInfo = [] {
     p.pictures_shown = rez::native_gfx_frame_swaps;
     // Shown on leaving, until NextUI draws again: a nod to Rez's lore.
     p.exit_message = "Exiting the system...";
-    if (const char* w = std::getenv("REZ_WIDESCREEN"); w && w[0] == '1') {
-        g_widescreen = true;
+    const char* env_wide = std::getenv("REZ_WIDESCREEN");
+    if (!env_wide || env_wide[0] != '0') {
         p.widescreen = widescreen;
         p.widescreen_anamorphic = true;
         p.max_aspect = 16.0f / 9.0f;

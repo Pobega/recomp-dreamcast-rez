@@ -475,6 +475,19 @@ struct Translucent {
 };
 
 constexpr std::size_t kMaxRegroupLookahead = 512;
+constexpr std::size_t kMediumSceneTranslucents = 1024;
+constexpr std::size_t kHeavySceneTranslucents = 2500;
+constexpr std::size_t kMediumRegroupLookahead = 128;
+constexpr std::size_t kHeavyRegroupLookahead = 32;
+constexpr std::size_t kMaxPerTriangleTranslucentStrips = 1500;
+
+std::size_t regroup_lookahead_for_scene(std::size_t translucent_count) noexcept {
+    if (translucent_count >= kHeavySceneTranslucents)
+        return kHeavyRegroupLookahead;
+    if (translucent_count >= kMediumSceneTranslucents)
+        return kMediumRegroupLookahead;
+    return kMaxRegroupLookahead;
+}
 
 void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
     const std::size_t n = in.size();
@@ -484,6 +497,7 @@ void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
     thread_local std::vector<std::uint8_t> emitted;
     emitted.assign(n, 0);
 
+    const std::size_t lookahead = regroup_lookahead_for_scene(n);
     for (std::size_t i = 0; i < n; ++i) {
         if (emitted[i])
             continue;
@@ -498,7 +512,7 @@ void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
         Box blocker_box{};
         bool has_blocker = false;
 
-        const std::size_t limit = std::min(n, i + 1 + kMaxRegroupLookahead);
+        const std::size_t limit = std::min(n, i + 1 + lookahead);
         for (std::size_t j = i + 1; j < limit; ++j) {
             if (emitted[j])
                 continue;
@@ -926,6 +940,9 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
     pairs.clear();
 
     const bool per_triangle = geometry.autosort;
+    const bool split_translucent_strips =
+        geometry.autosort &&
+        frame.lists[static_cast<unsigned>(ListType::Translucent)].size() <= kMaxPerTriangleTranslucentStrips;
     std::size_t indices = 0;
 
     const auto add_translucent = [&](const Item& item, const Box& bb) {
@@ -984,7 +1001,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                 continue;
             }
             const bool is_additive = even < t_states.size() && t_states[even].additive;
-            if (blended && per_triangle && !is_additive && p.count > 3) {
+            if (blended && split_translucent_strips && !is_additive && p.count > 3) {
                 for (std::uint32_t i = 0; i + 2 < p.count; ++i) {
                     const Vertex& a = frame.vertices[p.first + i];
                     const Vertex& b = frame.vertices[p.first + i + 1];
