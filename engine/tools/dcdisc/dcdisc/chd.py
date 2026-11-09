@@ -252,7 +252,9 @@ def _candidate_libraries(repo_root: Optional[str]) -> list[str]:
         while outer:
             rel = os.path.relpath(os.path.join(repo_root, "third_party", "libchdr"), outer)
             for n in names:
+                cands += sorted(glob.glob(os.path.join(outer, "build", "host", rel, n)))
                 cands += sorted(glob.glob(os.path.join(outer, "build*", rel, n)))
+                cands += sorted(glob.glob(os.path.join(outer, "build*", "**", rel, n), recursive=True))
             outer = find_repo_root(os.path.dirname(outer))
     for n in names:
         cands.append(n)

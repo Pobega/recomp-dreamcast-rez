@@ -58,8 +58,7 @@ public:
 private:
     static constexpr std::size_t kBlockFrames = 512;  // stereo frames per send
 
-    // The playback device as each implementation keeps it: SDL3's audio stream (sdl_sink.cpp), or
-    // for a NextUI build SDL2's device with a queue and resampler of its own (sdl2_sink.cpp).
+    // The playback device: SDL2 device with a queue and resampler (sdl2_sink.cpp).
     struct Device;
     Device* device_ = nullptr;
     std::vector<std::int16_t> block_;

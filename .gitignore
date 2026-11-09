@@ -25,8 +25,7 @@ texture_dump/
 texture_packs/
 
 # Build output and machine-local state
-/build*/
-/.deps/
+/build/
 /.rez_recompiled/
 /.cache/
 compile_commands.json

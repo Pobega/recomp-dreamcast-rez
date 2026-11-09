@@ -154,11 +154,7 @@ private:
     void refresh_devices();
 
     bool capturing_ = false, captured_ = false, capture_cancelled_ = false;
-#if defined(DREAMCOMP_PORTMASTER)
     bool escape_quits_ = false;
-#else
-    bool escape_quits_ = true;
-#endif
     bool pad_menu_button_ = true;
     bool game_input_blocked_ = false;
     PresentMode wanted_present_ = PresentMode::Fifo;

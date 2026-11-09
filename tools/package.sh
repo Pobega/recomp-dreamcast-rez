@@ -1,12 +1,12 @@
 #!/bin/sh
-# Assemble build-portmaster/rez.zip for PortMaster distribution.
+# Assemble build/rez.zip for PortMaster distribution.
 set -e
-cd "$(dirname "$0")/../.."
-EXE=build-portmaster/rez/game/rez-recomp
-PKG=build-portmaster/pkg
-ZIP=build-portmaster/rez.zip
+cd "$(dirname "$0")/.."
+EXE=build/target/game/rez-recomp
+PKG=build/pkg
+ZIP=build/rez.zip
 
-[ -x "$EXE" ] || { echo "package: $EXE missing (tools/portmaster/build.sh)"; exit 2; }
+[ -x "$EXE" ] || { echo "package: $EXE missing (tools/build.sh)"; exit 2; }
 
 rm -rf "$PKG"
 mkdir -p "$PKG/rez/gamedata" "$PKG/rez/disc" "$PKG/rez/licenses"
@@ -15,7 +15,7 @@ cp portmaster/Rez.sh "$PKG/Rez.sh"
 chmod +x "$PKG/Rez.sh"
 
 STRIP=""
-for cand in llvm-strip "$PWD/build-portmaster/toolchain/bin/aarch64-nextui-linux-gnu-strip" "$PWD/build-brick/toolchain/bin/aarch64-nextui-linux-gnu-strip" aarch64-linux-gnu-strip; do
+for cand in llvm-strip "$PWD/build/toolchain/bin/aarch64-nextui-linux-gnu-strip" aarch64-linux-gnu-strip; do
     if command -v "$cand" >/dev/null 2>&1 || [ -x "$cand" ]; then
         STRIP="$cand"
         break

@@ -1,7 +1,5 @@
-// See sink.h. The NextUI build's playback through SDL2, which has no audio stream to queue into
-// and no playback ratio to set. Samples go into our own queue, read by the device's callback
-// through a linear resampler stepping `ratio` queued samples per sample played, so queueing,
-// dropping and rate control match sdl_sink.cpp.
+// See sink.h. Playback through SDL2, with internal sample queue and resampler stepping
+// `ratio` queued samples per sample played.
 #include "dream/audio/sink.h"
 
 #include <SDL.h>

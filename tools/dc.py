@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
-"""Setup, build and run Rez from the repository root.
+"""Setup, build and package Rez for PortMaster from the repository root.
 
     python tools/dc.py doctor                  what this machine has / lacks
-    python tools/dc.py deps                    fetch SDL3 into .deps/ (Windows: VC devel zip)
     python tools/dc.py setup --disc <image>    verify the disc, extract the boot binary and code
                                                overlays into game/extracted/, remember the image
-    python tools/dc.py build [--target T] [--fresh] [--headless]
-    python tools/dc.py run [--window] [-- launcher args...]
-
-Builds go to build/. On Windows every compiler call runs inside the Visual Studio developer
-environment, found with vswhere. The remembered disc path lives in .rez_recompiled/local.json
-(git-ignored).
+    python tools/dc.py build [-j N]            build host translator, cross-compile aarch64 binary,
+                                               and package build/rez.zip
 """
 from __future__ import annotations
 
@@ -22,66 +17,17 @@ import os
 import shutil
 import subprocess
 import sys
-import urllib.request
-import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEPS = os.path.join(ROOT, ".deps")
-SDL3_VERSION = "3.4.18"
-IS_WIN = os.name == "nt"
-EXE = ".exe" if IS_WIN else ""
-
-
-# ---------------------------------------------------------------------------------------------
-# environment
-
-def vcvars() -> str | None:
-    if not IS_WIN:
-        return None
-    vswhere = os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe")
-    if os.path.exists(vswhere):
-        out = subprocess.run([vswhere, "-latest", "-products", "*", "-property", "installationPath"],
-                             capture_output=True, text=True).stdout.strip()
-        for line in out.splitlines():
-            p = os.path.join(line, r"VC\Auxiliary\Build\vcvars64.bat")
-            if os.path.exists(p):
-                return p
-    return None
-
-
-_ENV_CACHE: dict | None = None
-
-
-def build_env() -> dict:
-    """os.environ plus the MSVC developer environment on Windows (cached per process)."""
-    global _ENV_CACHE
-    if _ENV_CACHE is not None:
-        return _ENV_CACHE
-    env = dict(os.environ)
-    vc = vcvars()
-    if vc:
-        out = subprocess.run(f'cmd /s /c ""{vc}" >nul && set"', capture_output=True, text=True, shell=True).stdout
-        for line in out.splitlines():
-            if "=" in line:
-                k, v = line.split("=", 1)
-                env[k] = v
-    vk = glob.glob(r"C:\VulkanSDK\*") if IS_WIN else []
-    if vk and "VULKAN_SDK" not in env:
-        env["VULKAN_SDK"] = sorted(vk)[-1]
-    _ENV_CACHE = env
-    return env
 
 
 def run(cmd: list[str], cwd: str | None = None, check: bool = True, env: dict | None = None) -> int:
     print("+ " + " ".join(f'"{c}"' if " " in c else c for c in cmd), flush=True)
-    r = subprocess.run(cmd, cwd=cwd, env=env or build_env())
+    r = subprocess.run(cmd, cwd=cwd, env=env or os.environ)
     if check and r.returncode != 0:
         sys.exit(f"command failed with exit code {r.returncode}")
     return r.returncode
 
-
-# ---------------------------------------------------------------------------------------------
-# project helpers
 
 def port_info() -> dict:
     port = ROOT
@@ -92,10 +38,7 @@ def port_info() -> dict:
     gid = os.path.splitext(os.path.basename(tomls[0]))[0]
     local_path = os.path.join(port, ".rez_recompiled", "local.json")
     local = json.load(open(local_path)) if os.path.exists(local_path) else {}
-    exe_candidates = glob.glob(os.path.join(port, "build", "game", f"*{EXE}"))
-    exe = next((e for e in exe_candidates if os.path.isfile(e) and
-                (e.endswith(".exe") if IS_WIN else os.access(e, os.X_OK))), None)
-    return {"dir": port, "id": gid, "toml": tomls[0], "local": local, "local_path": local_path, "exe": exe}
+    return {"dir": port, "id": gid, "toml": tomls[0], "local": local, "local_path": local_path}
 
 
 def save_local(info: dict) -> None:
@@ -104,58 +47,26 @@ def save_local(info: dict) -> None:
         json.dump(info["local"], f, indent=2)
 
 
-def dcdisc_env() -> dict:
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.path.join(ROOT, "engine", "tools", "dcdisc") + os.pathsep + env.get("PYTHONPATH", "")
-    return env
-
-
-# ---------------------------------------------------------------------------------------------
-# commands
-
 def cmd_doctor(_a) -> int:
-    env = build_env()
     rows = []
 
     def have(name, ok, note=""):
         rows.append((name, "ok" if ok else "MISSING", note))
 
-    for tool in ("cmake", "ninja"):
-        have(tool, shutil.which(tool, path=env.get("PATH")) is not None)
-    ccs = ("clang-cl",) if IS_WIN else ("clang++", "g++")
-    have("C++20 compiler", any(shutil.which(c, path=env.get("PATH")) for c in ccs), "/".join(ccs))
-    if IS_WIN:
-        have("MSVC environment (vcvars64)", vcvars() is not None, "Visual Studio 2022 Build Tools: Windows SDK + linker")
-    glslc = shutil.which("glslc", path=env.get("PATH")) or (
-        os.path.join(env["VULKAN_SDK"], "Bin", "glslc.exe") if env.get("VULKAN_SDK") else None)
-    have("Vulkan SDK / glslc", bool(glslc and os.path.exists(glslc)), "Vulkan headers, loader and glslc")
-    have("SDL3", bool(glob.glob(os.path.join(DEPS, "SDL3-*"))) or not IS_WIN, "python tools/dc.py deps")
+    for tool in ("cmake", "ninja", "clang", "clang++", "ld.lld"):
+        have(tool, shutil.which(tool) is not None)
+
+    container_tool = shutil.which("podman") or shutil.which("docker")
+    have("podman/docker", container_tool is not None, container_tool or "needed by tools/toolchain.sh")
+
+    tc_dir = os.path.join(ROOT, "build", "toolchain")
+    tc_ok = os.path.isdir(os.path.join(tc_dir, "aarch64-nextui-linux-gnu", "libc"))
+    have("toolchain (build/toolchain)", tc_ok, "sh tools/toolchain.sh")
+
     w = max(len(r[0]) for r in rows)
     for name, st, note in rows:
         print(f"{name:<{w}}  {st:<7}  {note}")
     return 0 if all(r[1] == "ok" for r in rows) else 1
-
-
-def cmd_deps(_a) -> int:
-    os.makedirs(DEPS, exist_ok=True)
-    if IS_WIN:
-        dst = os.path.join(DEPS, f"SDL3-{SDL3_VERSION}")
-        if os.path.isdir(dst):
-            print(f"SDL3 {SDL3_VERSION} already in {dst}")
-            return 0
-        url = (f"https://github.com/libsdl-org/SDL/releases/download/release-{SDL3_VERSION}/"
-               f"SDL3-devel-{SDL3_VERSION}-VC.zip")
-        zpath = os.path.join(DEPS, "sdl3.zip")
-        print(f"downloading {url}")
-        urllib.request.urlretrieve(url, zpath)
-        with zipfile.ZipFile(zpath) as z:
-            z.extractall(DEPS)
-        os.remove(zpath)
-        print(f"SDL3 -> {dst}")
-        return 0
-    print("Linux/macOS: install SDL3 from your package manager (e.g. `brew install sdl3`, "
-          "`apt install libsdl3-dev`) or build it from source; CMake finds it on the default prefix.")
-    return 0
 
 
 def cmd_setup(a) -> int:
@@ -180,18 +91,14 @@ def cmd_setup(a) -> int:
     accepted = [(e["sha1"].lower(), e.get("name", "")) for e in disc_cfg.get("chd", [])]
     if disc_cfg.get("chd_sha1"):
         accepted.append((disc_cfg["chd_sha1"].lower(), ""))
-    bootstrapped_chdr = False
     if accepted:
         import dcdisc.chd as chd_mod
         from dcdisc.chd import ChdError, data_sha1, read_header
         if chd_mod.load_libchdr() is None:
-            bdir = os.path.join(info["dir"], "build")
+            bdir = os.path.join(info["dir"], "build", "host")
             if not os.path.exists(os.path.join(bdir, "CMakeCache.txt")):
-                cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"]
-                if IS_WIN:
-                    cfg += ["-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl"]
+                cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DDREAM_RENDERER=OFF"]
                 run(cfg)
-                bootstrapped_chdr = True
             run(["cmake", "--build", bdir, "--target", "chdr", "--parallel"])
             chd_mod._lib_missing = False
         names = "\n".join(f"  {n or '?'}.chd (SHA-1 {s})" for s, n in accepted)
@@ -250,8 +157,6 @@ def cmd_setup(a) -> int:
         write_if_changed(dst, blob)
     if overlays:
         print(f"{len(overlays)} overlay file(s) named in the config extracted to {out}")
-    if bootstrapped_chdr:
-        run(["cmake", os.path.join(info["dir"], "build")])
     info["local"]["disc"] = disc
     save_local(info)
     print(f"disc path remembered in {info['local_path']}")
@@ -259,59 +164,29 @@ def cmd_setup(a) -> int:
 
 
 def cmd_build(a) -> int:
-    info = port_info()
-    bdir = os.path.join(info["dir"], "build")
-    if a.fresh and os.path.isdir(bdir):
-        shutil.rmtree(bdir)
-    if not os.path.exists(os.path.join(bdir, "CMakeCache.txt")):
-        cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"]
-        if IS_WIN:
-            cfg += ["-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl"]
-        if a.headless:
-            cfg += ["-DDREAM_RENDERER=OFF"]
-        run(cfg)
-    target = a.target or f"{info['id']}_boot"
-    run(["cmake", "--build", bdir, "--target", target, "--parallel"])
+    build_sh = os.path.join(ROOT, "tools", "build.sh")
+    package_sh = os.path.join(ROOT, "tools", "package.sh")
+    cmd = ["sh", build_sh]
+    if a.jobs:
+        cmd += [f"-j{a.jobs}"]
+    if a.extra:
+        cmd += a.extra
+    run(cmd)
+    run(["sh", package_sh])
     return 0
-
-
-def launcher_args(info: dict, extra: list[str]) -> list[str]:
-    exe = info["exe"]
-    if not exe:
-        sys.exit("no executable yet: python tools/dc.py build")
-    args = [exe, "--config", info["toml"]]
-    if info["local"].get("disc") and "--disc" not in extra:
-        args += ["--disc", info["local"]["disc"]]
-    return args + extra
-
-
-def cmd_run(a) -> int:
-    info = port_info()
-    extra = list(a.args)
-    if extra and extra[0] == "--":
-        extra = extra[1:]
-    if a.window:
-        extra = ["--window"] + extra
-    return run(launcher_args(info, extra), cwd=info["dir"], check=False, env=dict(os.environ))
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("doctor").set_defaults(fn=cmd_doctor)
-    sub.add_parser("deps").set_defaults(fn=cmd_deps)
     s = sub.add_parser("setup")
     s.add_argument("--disc", required=True)
     s.set_defaults(fn=cmd_setup)
-    s = sub.add_parser("build")
-    s.add_argument("--target")
-    s.add_argument("--fresh", action="store_true")
-    s.add_argument("--headless", action="store_true")
-    s.set_defaults(fn=cmd_build)
-    s = sub.add_parser("run")
-    s.add_argument("--window", action="store_true")
-    s.add_argument("args", nargs=argparse.REMAINDER)
-    s.set_defaults(fn=cmd_run)
+    b = sub.add_parser("build")
+    b.add_argument("-j", "--jobs", type=int, help="parallel jobs for ninja")
+    b.add_argument("extra", nargs="*", help="extra arguments passed to build.sh / ninja")
+    b.set_defaults(fn=cmd_build)
     a = ap.parse_args(argv)
     return a.fn(a)
 

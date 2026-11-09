@@ -1,4 +1,4 @@
-// The disc folder of a NextUI build: each file the player put there, identified against the
+// The disc folder of a build: each file the player put there, identified against the
 // port's [[disc.chd]] images by the SHA-1 its CHD header records.
 #pragma once
 
@@ -8,7 +8,7 @@
 
 #include "dream/translator/config/game_config.h"
 
-namespace dreamcomp::nextui {
+namespace dreamcomp {
 
 struct DiscFile {
     std::filesystem::path path;
@@ -23,4 +23,4 @@ struct DiscFile {
 std::vector<DiscFile> scan_disc_folder(const std::filesystem::path& dir,
                                        const std::vector<dream::translator::ChdImage>& images);
 
-}  // namespace dreamcomp::nextui
+}  // namespace dreamcomp

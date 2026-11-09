@@ -1,4 +1,4 @@
-#include "nextui/disc_folder.h"
+#include "dreamcomp/disc_folder.h"
 
 #include <algorithm>
 #include <cctype>
@@ -6,7 +6,7 @@
 
 #include "dream/runtime/gdrom/disc.h"
 
-namespace dreamcomp::nextui {
+namespace dreamcomp {
 
 namespace {
 
@@ -61,4 +61,4 @@ std::vector<DiscFile> scan_disc_folder(const std::filesystem::path& dir,
     return out;
 }
 
-}  // namespace dreamcomp::nextui
+}  // namespace dreamcomp

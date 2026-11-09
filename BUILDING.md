@@ -1,30 +1,34 @@
-# Building Rez Recompiled
+# Building Rez Recompiled (PortMaster aarch64)
 
-## Linux
+Rez Recompiled targets Linux handhelds running PortMaster (`aarch64`). It cross-compiles using Clang, LLD, and the extracted sysroot toolchain, rendering via a unified OpenGL ES 3.0 pipeline with SDL2.
 
-Needs CMake 3.24+, Ninja, a C++20 compiler (GCC or Clang), Python 3.11+, SDL2, and OpenGL ES 3.0 development headers and library (`<GLES3/gl3.h>`, `libGLESv2`).
+## Prerequisites
 
-```
-python tools/dc.py setup --disc "/path/to/Rez (Japan) (En,Ja,Fr,De,Es,It).chd"
-python tools/dc.py build
-python tools/dc.py run --window
-```
+- CMake 3.24+, Ninja, Clang, LLD, and Python 3.11+
+- Podman or Docker (to extract the cross-toolchain sysroot)
+- A supported Rez Dreamcast disc image (Japanese or European `.chd`)
 
-`setup` checks the image (its CHD SHA-1, then all of its data against the CHD's own checksum) and
-the boot file's SHA-1. It remembers the image's path, so leave the image where it is. Settings and
-the memory card are kept in `~/.config/rez_recompiled/`.
+## Build Steps
 
-## PortMaster (aarch64)
+1. **Extract the cross-compilation toolchain**:
+   ```sh
+   sh tools/toolchain.sh
+   ```
+   This extracts the `aarch64` sysroot into `build/toolchain/`.
 
-Build the PC version first (`python tools/dc.py setup` and `python tools/dc.py build`) to generate the translated game C++ and build `dream-translate`.
+2. **Verify disc and extract boot code**:
+   ```sh
+   python3 tools/dc.py setup --disc "/path/to/Rez (Japan) (En,Ja,Fr,De,Es,It).chd"
+   ```
+   This builds `libchdr` in `build/host/`, validates the CHD checksum, and extracts `1ST_READ.BIN` and overlays into `game/extracted/fs/`.
 
-Needs the cross toolchain (`tools/portmaster/toolchain.sh`), Clang, and LLD. Rez uses a unified SDL2 + OpenGL ES 3.0 renderer with no Vulkan dependency, running across all PortMaster aarch64 devices including Mali-G31 MP2 (Anbernic H700 RGSP) and PowerVR GE8300 (TrimUI Brick).
+3. **Build and Package**:
+   ```sh
+   python3 tools/dc.py build -j8
+   # or manually:
+   sh tools/build.sh -j8
+   sh tools/package.sh
+   ```
+   This builds the host translator in `build/host/`, cross-compiles `rez_boot` into `build/target/game/rez-recomp`, and packages `build/rez.zip` containing `Rez.sh` and `rez/`.
 
-```sh
-tools/portmaster/toolchain.sh
-tools/portmaster/build.sh
-tools/portmaster/package.sh          # writes build-portmaster/rez.zip
-```
-
-Executables built from this repository contain the game's code in
-translated form, compiled from the builder's own disc. They still need the player's disc to run.
+Executables built from this repository contain the game's code in translated form, compiled from the builder's own disc. They still need the player's disc to run.

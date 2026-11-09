@@ -15,21 +15,17 @@ elseif(_dc_threads GREATER 64)
 endif()
 set(DREAM_GEN_SHARDS ${_dc_threads} CACHE STRING "Parts the generated game code is split into")
 
-option(DREAMCOMP_PORTMASTER "Build for PortMaster handhelds (SDL2)" OFF)
-
 set(DREAMCOMP_FP_OPTIONS $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-ffp-contract=off>
                          $<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:-ffp-contract=off>)
 add_compile_options(${DREAMCOMP_FP_OPTIONS})
 add_subdirectory(engine)
 include(cmake/Port.cmake)
 
-set(DREAMCOMP_WARNINGS
-    "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
-    "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall;-Wextra;-Wpedantic;-Wshadow;-Wconversion;-Wno-sign-conversion>")
+set(DREAMCOMP_WARNINGS -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion)
 
 add_library(dreamcomp_core OBJECT src/framework/core.cpp src/framework/settings.cpp
                                   src/framework/hud.cpp src/framework/sharp2d.cpp
-                                  src/framework/nextui/disc_folder.cpp)
+                                  src/framework/disc_folder.cpp)
 target_include_directories(dreamcomp_core PUBLIC ${PROJECT_SOURCE_DIR}/include
                                                  ${PROJECT_SOURCE_DIR}/src/framework)
 target_link_libraries(dreamcomp_core PUBLIC dream::runtime dream::render dream::translator)
@@ -38,9 +34,6 @@ target_compile_options(dreamcomp_core PRIVATE ${DREAMCOMP_WARNINGS})
 if(TARGET dream_render_vk)
   target_link_libraries(dreamcomp_core PUBLIC dream::render_vk)
   target_compile_definitions(dreamcomp_core PRIVATE DREAM_WITH_RENDERER)
-endif()
-if(DREAMCOMP_PORTMASTER)
-  target_compile_definitions(dreamcomp_core PRIVATE DREAMCOMP_PORTMASTER)
 endif()
 
 add_subdirectory(game)

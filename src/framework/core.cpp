@@ -29,17 +29,11 @@
 #include "dreamcomp/sharp2d.h"
 #include "dreamcomp/settings.h"
 #include "dream/translator/config/game_config.h"
-#include "nextui/disc_folder.h"
+#include "dreamcomp/disc_folder.h"
 
 #if __has_include("dream/render/vk/present.h") && defined(DREAM_WITH_RENDERER)
 #include "dream/render/vk/present.h"
 #define DREAMCOMP_HAS_PRESENTER 1
-#endif
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
 #endif
 
 namespace dreamcomp {
@@ -49,14 +43,9 @@ namespace {
 const PortInfo* g_port = nullptr;
 Settings g_settings;
 // The highest render scale and the default; a settings file asking for more is held to it.
-#if defined(DREAMCOMP_PORTMASTER)
 // A handheld: the Dreamcast's own 640x480 by default, or the panel's own ("panel").
 constexpr int kMaxScale = 2;
 constexpr int kDefaultScale = 1;
-#else
-constexpr int kMaxScale = 8;
-constexpr int kDefaultScale = 2;
-#endif
 static_assert(kScalePanel == static_cast<int>(dream::host::HostControls::kScalePanel));
 
 // The setting `scale`: a multiple of 640x480 held to this build's range, or "panel", the display's
@@ -65,12 +54,10 @@ int scale_setting() {
     if (g_settings.get("scale") == "panel")
         return kScalePanel;
     const int scale = std::clamp(g_settings.get_int("scale", kDefaultScale), 1, kMaxScale);
-#if defined(DREAMCOMP_PORTMASTER)
     // A handheld's choices are 640x480 and the panel's own; a saved 2 reads as the panel's
     // (--scale 2 still draws 1280x960).
     if (scale > 1)
         return kScalePanel;
-#endif
     return scale;
 }
 
@@ -79,12 +66,6 @@ std::string scale_arg(int scale) {
 }
 
 std::filesystem::path exe_dir(const std::string& argv0) {
-#ifdef _WIN32
-    wchar_t buf[MAX_PATH];
-    const DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
-    if (n > 0 && n < MAX_PATH)
-        return std::filesystem::path(buf).parent_path();
-#endif
     std::error_code ec;
     // Normalised: started as ./name, paths built on the folder would hold a "/." otherwise.
     auto p = std::filesystem::absolute(argv0, ec).lexically_normal();
@@ -246,7 +227,7 @@ std::filesystem::path find_disc_in_folders(const std::string& config_path,
         std::error_code ec;
         if (!std::filesystem::exists(dir, ec))
             continue;
-        const auto files = nextui::scan_disc_folder(dir, cfg.chd_images);
+        const auto files = scan_disc_folder(dir, cfg.chd_images);
         for (const auto& f : files) {
             if (f.image >= 0)
                 return f.path;
@@ -265,11 +246,7 @@ public:
         const std::filesystem::path config_dir =
             default_config_dir(g_port && g_port->folder ? g_port->folder : id);
         // Double-clicked: the play path with the saved settings.
-#if defined(DREAMCOMP_PORTMASTER)
         const bool play = bare || !has_flag(args, "--max-frames");
-#else
-        const bool play = bare;
-#endif
 
         std::filesystem::path file = flag_value(args, "--settings");
         if (file.empty())
@@ -814,11 +791,7 @@ void set_render_scale(int scale) {
 }
 
 int render_scale_high() {
-#if defined(DREAMCOMP_PORTMASTER)
     return kScalePanel;  // the panel's pixels one to one
-#else
-    return 2;
-#endif
 }
 
 void render_size(int scale, int& w, int& h) {

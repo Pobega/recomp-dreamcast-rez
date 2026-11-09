@@ -21,18 +21,10 @@ std::string trim(const std::string& s) {
 
 std::filesystem::path default_config_dir(const std::string& folder) {
     std::filesystem::path base;
-#if defined(_WIN32)
-    if (const char* appdata = std::getenv("APPDATA"))
-        base = appdata;
-#elif defined(__APPLE__)
-    if (const char* home = std::getenv("HOME"))
-        base = std::filesystem::path(home) / "Library" / "Application Support";
-#else
     if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
         base = xdg;
     else if (const char* home = std::getenv("HOME"))
         base = std::filesystem::path(home) / ".config";
-#endif
     if (base.empty())
         base = std::filesystem::current_path();
     return base / folder;

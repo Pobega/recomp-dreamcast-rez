@@ -22,21 +22,10 @@ function(dreamcomp_add_port id)
   if(ARG_SOURCES)
     target_sources(${id}_boot PRIVATE ${ARG_SOURCES})
   endif()
-  # A linker map beside the executable, so a crash report's "module + offset" names a function.
-  if(MSVC)
-    target_link_options(${id}_boot PRIVATE "/MAP")
-  endif()
   if(ARG_OUTPUT_NAME)
     set_target_properties(${id}_boot PROPERTIES OUTPUT_NAME ${ARG_OUTPUT_NAME})
   endif()
   target_compile_definitions(${id}_boot PRIVATE DREAMCOMP_PORT_ID="${id}"
                                                 DREAMCOMP_PORT_TITLE="${ARG_TITLE}")
-  # Windows has no rpath: put the runtime DLLs of everything linked (SDL3) next to the executable.
-  if(WIN32)
-    add_custom_command(TARGET ${id}_boot POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${id}_boot>
-              $<TARGET_FILE_DIR:${id}_boot>
-      COMMAND_EXPAND_LISTS VERBATIM)
-  endif()
   message(STATUS "${ARG_TITLE} (${id}) configured")
 endfunction()

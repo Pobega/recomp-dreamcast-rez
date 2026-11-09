@@ -1063,11 +1063,7 @@ public:
         // from the outside is indistinguishable from a crash.
         if (rearm_escape && !window.held(Control::Back)) {
             rearm_escape = false;
-#if defined(DREAMCOMP_PORTMASTER)
             window.set_escape_quits(false);
-#else
-            window.set_escape_quits(overlays.empty());  // an overlay owns escape
-#endif
         }
         // an overlay host has its own controls screen and gives F1 to the HUD editor.
         // The key is polled here, not taken from the event the overlay consumed, so it has to be
