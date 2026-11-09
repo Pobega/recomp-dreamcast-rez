@@ -31,4 +31,11 @@ Rez Recompiled targets Linux handhelds running PortMaster (`aarch64`). It cross-
    ```
    This builds the host translator in `build/host/`, cross-compiles `rez_boot` into `build/target/game/rez-recomp`, and packages `build/rez.zip` containing `Rez.sh` and `rez/`.
 
+4. **Optional Linux Desktop Test Build (`x86_64`)**:
+   Because the unified OpenGL ES 3.0 + SDL2 renderer also compiles natively on Linux desktop (with `SDL2` and `GLESv2` headers/libs installed), you can build and run a local test binary in `build/host/`:
+   ```sh
+   python3 tools/dc.py build --host -j8
+   python3 tools/dc.py run
+   ```
+
 Executables built from this repository contain the game's code in translated form, compiled from the builder's own disc. They still need the player's disc to run.

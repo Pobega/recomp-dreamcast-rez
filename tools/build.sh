@@ -13,7 +13,7 @@ TRANSLATE="$PWD/build/host/engine/translator/dream-translate"
 [ -d "$TC/aarch64-nextui-linux-gnu/libc" ] || { echo "portmaster: no toolchain at $TC (tools/toolchain.sh)"; exit 2; }
 if [ ! -x "$TRANSLATE" ]; then
     echo "portmaster: building host translator ($TRANSLATE)..."
-    cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Release -DDREAM_RENDERER=OFF
+    cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Release
     ninja -C build/host dream-translate
 fi
 [ -x "$TRANSLATE" ] || { echo "portmaster: translator build failed ($TRANSLATE)"; exit 2; }

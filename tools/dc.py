@@ -4,8 +4,9 @@
     python tools/dc.py doctor                  what this machine has / lacks
     python tools/dc.py setup --disc <image>    verify the disc, extract the boot binary and code
                                                overlays into game/extracted/, remember the image
-    python tools/dc.py build [-j N]            build host translator, cross-compile aarch64 binary,
-                                               and package build/rez.zip
+    python tools/dc.py build [-j N] [--host]   cross-compile aarch64 and package build/rez.zip
+                                               (or pass --host to build build/host/game/rez-recomp)
+    python tools/dc.py run [-- args...]        run the Linux desktop test build (build/host/game/rez-recomp)
 """
 from __future__ import annotations
 
@@ -97,7 +98,7 @@ def cmd_setup(a) -> int:
         if chd_mod.load_libchdr() is None:
             bdir = os.path.join(info["dir"], "build", "host")
             if not os.path.exists(os.path.join(bdir, "CMakeCache.txt")):
-                cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DDREAM_RENDERER=OFF"]
+                cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"]
                 run(cfg)
             run(["cmake", "--build", bdir, "--target", "chdr", "--parallel"])
             chd_mod._lib_missing = False
@@ -164,6 +165,21 @@ def cmd_setup(a) -> int:
 
 
 def cmd_build(a) -> int:
+    info = port_info()
+    if a.host:
+        bdir = os.path.join(info["dir"], "build", "host")
+        run(["cmake", "-S", info["dir"], "-B", bdir, "-G", "Ninja",
+             "-DCMAKE_BUILD_TYPE=Release", "-DDREAM_RENDERER=ON"])
+        cmd = ["ninja", "-C", bdir]
+        if a.jobs:
+            cmd += [f"-j{a.jobs}"]
+        if a.extra:
+            cmd += a.extra
+        else:
+            cmd += [f"{info['id']}_boot"]
+        run(cmd)
+        return 0
+
     build_sh = os.path.join(ROOT, "tools", "build.sh")
     package_sh = os.path.join(ROOT, "tools", "package.sh")
     cmd = ["sh", build_sh]
@@ -176,6 +192,20 @@ def cmd_build(a) -> int:
     return 0
 
 
+def cmd_run(a) -> int:
+    info = port_info()
+    exe = os.path.join(info["dir"], "build", "host", "game", f"{info['id']}-recomp")
+    if not os.path.isfile(exe) or not os.access(exe, os.X_OK):
+        sys.exit("no Linux desktop test executable yet: run `python3 tools/dc.py build --host`")
+    extra = list(a.args)
+    if extra and extra[0] == "--":
+        extra = extra[1:]
+    args = [exe, "--config", info["toml"]]
+    if info["local"].get("disc") and "--disc" not in extra:
+        args += ["--disc", info["local"]["disc"]]
+    return run(args + extra, cwd=info["dir"], check=False)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -184,9 +214,13 @@ def main(argv=None) -> int:
     s.add_argument("--disc", required=True)
     s.set_defaults(fn=cmd_setup)
     b = sub.add_parser("build")
+    b.add_argument("--host", action="store_true", help="build native Linux desktop test binary in build/host")
     b.add_argument("-j", "--jobs", type=int, help="parallel jobs for ninja")
     b.add_argument("extra", nargs="*", help="extra arguments passed to build.sh / ninja")
     b.set_defaults(fn=cmd_build)
+    r = sub.add_parser("run")
+    r.add_argument("args", nargs=argparse.REMAINDER)
+    r.set_defaults(fn=cmd_run)
     a = ap.parse_args(argv)
     return a.fn(a)
 
