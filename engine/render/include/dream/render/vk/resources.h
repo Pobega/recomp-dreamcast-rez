@@ -34,6 +34,7 @@ public:
 private:
     std::vector<std::uint8_t> storage_;
     std::uint32_t gl_buf_ = 0;
+    std::size_t gl_capacity_ = 0;
 };
 
 }  // namespace dream::render::vk

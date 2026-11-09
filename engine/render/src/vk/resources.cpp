@@ -18,7 +18,9 @@ HostBuffer& HostBuffer::operator=(HostBuffer&& o) noexcept {
         destroy();
         storage_ = std::move(o.storage_);
         gl_buf_ = o.gl_buf_;
+        gl_capacity_ = o.gl_capacity_;
         o.gl_buf_ = 0;
+        o.gl_capacity_ = 0;
     }
     return *this;
 }
@@ -41,12 +43,17 @@ void HostBuffer::flush(std::size_t, std::size_t) {
 }
 
 void HostBuffer::upload_to_target(std::uint32_t gl_target, std::size_t active_bytes) {
+    const std::size_t upload_size =
+        (active_bytes > 0 && active_bytes <= storage_.size()) ? active_bytes : storage_.size();
+    if (upload_size == 0)
+        return;
     if (!gl_buf_)
         glGenBuffers(1, &gl_buf_);
     glBindBuffer(gl_target, gl_buf_);
-    const std::size_t upload_size =
-        (active_bytes > 0 && active_bytes <= storage_.size()) ? active_bytes : storage_.size();
-    glBufferData(gl_target, static_cast<GLsizeiptr>(upload_size), storage_.data(), GL_DYNAMIC_DRAW);
+    if (storage_.size() > gl_capacity_)
+        gl_capacity_ = storage_.size();
+    glBufferData(gl_target, static_cast<GLsizeiptr>(gl_capacity_), nullptr, GL_STREAM_DRAW);
+    glBufferSubData(gl_target, 0, static_cast<GLsizeiptr>(upload_size), storage_.data());
 }
 
 void HostBuffer::destroy() {
@@ -54,6 +61,7 @@ void HostBuffer::destroy() {
         glDeleteBuffers(1, &gl_buf_);
         gl_buf_ = 0;
     }
+    gl_capacity_ = 0;
     storage_.clear();
 }
 

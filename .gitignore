@@ -29,6 +29,7 @@ texture_packs/
 /.rez_recompiled/
 /.cache/
 compile_commands.json
+log.txt
 *.ppm
 *.wav
 *.log
