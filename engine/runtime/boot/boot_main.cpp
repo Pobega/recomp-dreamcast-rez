@@ -494,6 +494,8 @@ struct Live {
         // frame to show, so presentation and interpolation never see it.
         if (rtt_on && (regs[0x060 / 4] & 0x01000000u) != 0) {
             render_to_texture(frame, regs);
+            const float rtt_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - draw_start).count();
+            stats_.record_draw(rtt_ms);
             return;
         }
         if (interpolate) {
@@ -1306,7 +1308,6 @@ public:
         const double guest_s = static_cast<double>(guest_cycles) / 200e6;
         if (fps_mark == std::chrono::steady_clock::time_point{}) {
             fps_mark = now;
-            prof_log_mark = now;
             fps_frames_at_mark = presented;
             fps_guest_at_mark = guest_s;
             stats_.reset();
@@ -1375,18 +1376,14 @@ public:
             fps_dirty.store(true, std::memory_order_release);
         }
 
-        const double prof_elapsed = std::chrono::duration<double>(now - prof_log_mark).count();
-        if (prof_elapsed >= 1.0) {
-            if (enable_profile || show_fps) {
-                std::printf("[prof] vbl=%.1f (%.2fx) 3d=%.1f logic=%.1f (steps=%u/%u) | "
-                            "cpu=%.1f/%.1fms wait=%.1f/%.1fms dec=%.1fms draw=%.1f/%.1fms swap=%.1f/%.1fms | "
-                            "max_strips=%zu max_verts=%zu\n",
-                            fps_shown, speed_shown, renders_shown, logic_shown, steps_curr, steps_target,
-                            cpu_avg_ms, cpu_max_ms, wait_avg_ms, wait_max_ms, dec_avg_ms, draw_avg_ms,
-                            draw_max_ms, swap_avg_ms, swap_max_ms, max_strips, max_verts);
-                std::fflush(stdout);
-            }
-            prof_log_mark = now;
+        if (enable_profile || show_fps) {
+            std::printf("[prof] vbl=%.1f (%.2fx) 3d=%.1f logic=%.1f (steps=%u/%u) | "
+                        "cpu=%.1f/%.1fms wait=%.1f/%.1fms dec=%.1fms draw=%.1f/%.1fms swap=%.1f/%.1fms | "
+                        "max_strips=%zu max_verts=%zu\n",
+                        fps_shown, speed_shown, renders_shown, logic_shown, steps_curr, steps_target,
+                        cpu_avg_ms, cpu_max_ms, wait_avg_ms, wait_max_ms, dec_avg_ms, draw_avg_ms,
+                        draw_max_ms, swap_avg_ms, swap_max_ms, max_strips, max_verts);
+            std::fflush(stdout);
         }
 
         stats_.reset();
@@ -1510,7 +1507,6 @@ public:
     double logic_shown = 0.0;
     std::uint32_t last_step_counter = 0;
     bool have_last_step = false;
-    std::chrono::steady_clock::time_point prof_log_mark{};
     bool input_polled = false, window_open = true;  // poll_input()
     DisplaySync sync;                                // --sync-display
     // The binding screen (F1, or a pad's select button). The guest is stopped while it is up, so

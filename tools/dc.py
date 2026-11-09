@@ -192,6 +192,11 @@ def cmd_build(a) -> int:
     return 0
 
 
+def cmd_package(_a) -> int:
+    package_sh = os.path.join(ROOT, "tools", "package.sh")
+    return run(["sh", package_sh])
+
+
 def cmd_run(a) -> int:
     info = port_info()
     exe = os.path.join(info["dir"], "build", "host", "game", f"{info['id']}-recomp")
@@ -218,6 +223,8 @@ def main(argv=None) -> int:
     b.add_argument("-j", "--jobs", type=int, help="parallel jobs for ninja")
     b.add_argument("extra", nargs="*", help="extra arguments passed to build.sh / ninja")
     b.set_defaults(fn=cmd_build)
+    p = sub.add_parser("package", help="package staged files into build/rez.zip")
+    p.set_defaults(fn=cmd_package)
     r = sub.add_parser("run")
     r.add_argument("args", nargs=argparse.REMAINDER)
     r.set_defaults(fn=cmd_run)
