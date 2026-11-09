@@ -53,6 +53,7 @@ private:
         std::uint32_t sampler = 0;
         TextureInfo info;
         std::uint64_t last_frame = 0;
+        std::uint64_t palette_hash = 0;
     };
 
     struct Meta {
@@ -82,6 +83,9 @@ private:
     bool upload(VkCommandBuffer cmd, Entry& entry, const std::vector<std::uint32_t>& pixels,
                 std::uint32_t width, std::uint32_t height,
                 const std::vector<std::vector<std::uint32_t>>* mips = nullptr);
+    void update_in_place(Entry& entry, const std::vector<std::uint32_t>& pixels,
+                         std::uint32_t width, std::uint32_t height,
+                         const std::vector<std::vector<std::uint32_t>>* mips = nullptr);
     bool rendered_into(const TextureInfo& info) const;
 
     Context* ctx_ = nullptr;

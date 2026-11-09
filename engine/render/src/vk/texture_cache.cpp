@@ -243,6 +243,23 @@ bool TextureCache::upload(VkCommandBuffer, Entry& entry, const std::vector<std::
     return true;
 }
 
+void TextureCache::update_in_place(Entry& entry, const std::vector<std::uint32_t>& pixels,
+                                   std::uint32_t width, std::uint32_t height,
+                                   const std::vector<std::vector<std::uint32_t>>* mips) {
+    glBindTexture(GL_TEXTURE_2D, entry.tex);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height),
+                    GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    if (mips) {
+        for (std::size_t m = 0; m < mips->size(); ++m) {
+            const auto& mip = (*mips)[m];
+            const std::uint32_t mw = std::max(1u, width >> (m + 1));
+            const std::uint32_t mh = std::max(1u, height >> (m + 1));
+            glTexSubImage2D(GL_TEXTURE_2D, static_cast<GLint>(m + 1), 0, 0, static_cast<GLsizei>(mw),
+                            static_cast<GLsizei>(mh), GL_RGBA, GL_UNSIGNED_BYTE, mip.data());
+        }
+    }
+}
+
 VkDescriptorSet TextureCache::rtt_set(std::uint32_t tcw, std::uint32_t tsp, bool tiled) {
     TextureInfo info;
     if (!describe_texture(tcw, tsp, 0, info) || info.twiddled || info.vq || info.indexed())
@@ -365,8 +382,8 @@ VkDescriptorSet TextureCache::get(VkCommandBuffer cmd, std::uint32_t tcw, std::u
     if (const VkDescriptorSet rset = rtt_set(tcw, tsp, tiled))
         return rset;
 
-    const std::uint64_t hw_key = (static_cast<std::uint64_t>(tcw) << 32) | tsp;
-    Meta& m = meta_[hw_key];
+    const std::uint64_t tex_key = (static_cast<std::uint64_t>(tcw) << 6) | (tsp & 0x3Fu);
+    Meta& m = meta_[tex_key];
     if (!m.ok) {
         TextureInfo info;
         m.ok = describe_texture(tcw, tsp, 0, info);
@@ -377,17 +394,40 @@ VkDescriptorSet TextureCache::get(VkCommandBuffer cmd, std::uint32_t tcw, std::u
         }
     }
 
-    std::uint64_t key = (static_cast<std::uint64_t>(hw_key) << 1) | (tiled ? 1 : 0);
+    std::uint64_t ph = 0xCBF29CE484222325ull;
     if (m.indexed) {
-        std::uint64_t ph = 0xCBF29CE484222325ull;
         for (std::uint32_t b = m.palette_base / 16;
              b < (m.palette_base + m.palette_count) / 16 && b < 64; ++b)
             ph = (ph ^ bank_hash_[b]) * 0x100000001B3ull;
-        key ^= (ph << 17);
     }
 
-    auto it = entries_.find(key);
+    auto it = entries_.find(tex_key);
     if (it != entries_.end()) {
+        if (it->second.tex == 0)
+            return 0;
+        if (!m.indexed || it->second.palette_hash == ph) {
+            it->second.last_frame = frame_;
+            const std::uint32_t sampler = sampler_for(tsp, tiled, it->second.info.mipmapped);
+            return (static_cast<std::uint64_t>(sampler) << 32) | static_cast<std::uint64_t>(it->second.tex);
+        }
+
+        std::vector<std::uint32_t> pixels;
+        if (!decode_texture(it->second.info, vram_, vram_size_, palette_, pixels))
+            return 0;
+        std::vector<std::vector<std::uint32_t>> mips;
+        if (it->second.info.mipmapped) {
+            for (std::uint32_t size = it->second.info.width / 2; size >= 8; size /= 2) {
+                TextureInfo level = it->second.info;
+                level.width = level.height = size;
+                std::vector<std::uint32_t> px;
+                if (!decode_texture(level, vram_, vram_size_, palette_, px))
+                    break;
+                mips.push_back(std::move(px));
+            }
+        }
+        update_in_place(it->second, pixels, it->second.info.width, it->second.info.height,
+                        mips.empty() ? nullptr : &mips);
+        it->second.palette_hash = ph;
         it->second.last_frame = frame_;
         const std::uint32_t sampler = sampler_for(tsp, tiled, it->second.info.mipmapped);
         return (static_cast<std::uint64_t>(sampler) << 32) | static_cast<std::uint64_t>(it->second.tex);
@@ -395,7 +435,7 @@ VkDescriptorSet TextureCache::get(VkCommandBuffer cmd, std::uint32_t tcw, std::u
 
     Entry e{};
     if (!describe_texture(tcw, tsp, 0, e.info)) {
-        entries_.emplace(key, std::move(e));
+        entries_.emplace(tex_key, std::move(e));
         return 0;
     }
     std::uint64_t hash = 0;
@@ -417,7 +457,7 @@ VkDescriptorSet TextureCache::get(VkCommandBuffer cmd, std::uint32_t tcw, std::u
     std::vector<std::uint32_t> pixels;
     if (!replacement || replacer_.dumping()) {
         if (!decode_texture(e.info, vram_, vram_size_, palette_, pixels)) {
-            entries_.emplace(key, std::move(e));
+            entries_.emplace(tex_key, std::move(e));
             return 0;
         }
         if (hashed)
@@ -439,15 +479,16 @@ VkDescriptorSet TextureCache::get(VkCommandBuffer cmd, std::uint32_t tcw, std::u
             ? upload(cmd, e, replacement->pixels, replacement->width, replacement->height)
             : upload(cmd, e, pixels, e.info.width, e.info.height, mips.empty() ? nullptr : &mips);
     if (!uploaded) {
-        entries_.emplace(key, std::move(e));
+        entries_.emplace(tex_key, std::move(e));
         return 0;
     }
 
+    e.palette_hash = ph;
     e.last_frame = frame_;
     const std::uint32_t sampler = sampler_for(tsp, tiled, e.info.mipmapped);
     const VkDescriptorSet set = (static_cast<std::uint64_t>(sampler) << 32) |
                                 static_cast<std::uint64_t>(e.tex);
-    entries_.emplace(key, std::move(e));
+    entries_.emplace(tex_key, std::move(e));
     return set;
 }
 
