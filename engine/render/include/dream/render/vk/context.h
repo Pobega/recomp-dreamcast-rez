@@ -1,31 +1,53 @@
-// Vulkan device setup. Deliberately small and explicit rather than a port of Flycast's
-// context: this is the layer where the three host platforms differ, and the differences are worth
-// reading. macOS has no native Vulkan, so the loader talks to MoltenVK, which is a "portability"
-// driver: the instance must opt in through VK_KHR_portability_enumeration or the loader will not
-// enumerate it at all, and the device must enable VK_KHR_portability_subset.
 #pragma once
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
-#include <vulkan/vulkan.h>
-
 namespace dream::render::vk {
 
-// What the renderer can do on this machine. Feature support is a property of the GPU, not of the
-// operating system: the per-pixel transparency path needs fragment stores and atomics, which a
-// weak or old device may lack, and then the per-strip fallback is used instead.
+using VkCommandBuffer = void*;
+using VkRenderPass = std::uint64_t;
+using VkFramebuffer = std::uint64_t;
+using VkImage = std::uint64_t;
+using VkImageView = std::uint64_t;
+using VkSampler = std::uint64_t;
+using VkDescriptorSet = std::uint64_t;
+using VkDescriptorSetLayout = std::uint64_t;
+using VkPipeline = std::uint64_t;
+using VkPipelineLayout = std::uint64_t;
+using VkBuffer = std::uint64_t;
+using VkDeviceMemory = std::uint64_t;
+using VkInstance = void*;
+using VkPhysicalDevice = void*;
+using VkDevice = void*;
+using VkQueue = void*;
+
+struct VkOffset2D {
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+};
+
+struct VkExtent2D {
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+};
+
+struct VkRect2D {
+    VkOffset2D offset{};
+    VkExtent2D extent{};
+};
+
+#ifndef VK_NULL_HANDLE
+#define VK_NULL_HANDLE 0
+#endif
+
 struct DeviceCapabilities {
-    bool fragment_stores_and_atomics = false;  // per-pixel order-independent transparency
-    bool fragment_shader_interlock = false;    // ordered per-pixel access without a sort pass
+    bool fragment_stores_and_atomics = false;
+    bool fragment_shader_interlock = false;
     bool independent_blend = false;
     bool sampler_anisotropy = false;
-    // VK_KHR_external_memory_win32 + VK_KHR_win32_keyed_mutex enabled: images can be shared with
-    // D3D11 (DxgiPresenter).
     bool win32_interop = false;
-    // dma-buf memory can be imported (VK_EXT_external_memory_dma_buf), enabled in builds
-    // that present to a NextUI handheld's framebuffer (fb0_present.h, DREAM_RENDER_FB0).
     bool dma_buf = false;
     std::uint32_t max_texture_size = 0;
     std::string device_name;
@@ -34,33 +56,22 @@ struct DeviceCapabilities {
 class Context {
 public:
     Context() = default;
-    ~Context();
+    ~Context() = default;
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
 
-    // Creates the instance, picks a device, and creates the logical device and queue.
-    // `surface_extensions` come from the window (SDL3 supplies them); an empty list makes a
-    // context with no surface, as a NextUI handheld's window uses. Returns false and fills
-    // error() rather than throwing: no usable GPU is an ordinary outcome on a build machine.
-    bool create(const std::vector<const char*>& surface_extensions);
+    bool create(const std::vector<const char*>& surface_extensions = {});
     void destroy();
 
-    VkInstance instance() const noexcept { return instance_; }
-    VkPhysicalDevice physical_device() const noexcept { return physical_; }
-    VkDevice device() const noexcept { return device_; }
-    VkQueue queue() const noexcept { return queue_; }
-    std::uint32_t queue_family() const noexcept { return queue_family_; }
+    VkInstance instance() const noexcept { return nullptr; }
+    VkPhysicalDevice physical_device() const noexcept { return nullptr; }
+    VkDevice device() const noexcept { return nullptr; }
+    VkQueue queue() const noexcept { return nullptr; }
+    std::uint32_t queue_family() const noexcept { return 0; }
     const DeviceCapabilities& caps() const noexcept { return caps_; }
     const std::string& error() const noexcept { return error_; }
 
 private:
-    bool pick_device();
-
-    VkInstance instance_ = VK_NULL_HANDLE;
-    VkPhysicalDevice physical_ = VK_NULL_HANDLE;
-    VkDevice device_ = VK_NULL_HANDLE;
-    VkQueue queue_ = VK_NULL_HANDLE;
-    std::uint32_t queue_family_ = 0;
     DeviceCapabilities caps_;
     std::string error_;
 };

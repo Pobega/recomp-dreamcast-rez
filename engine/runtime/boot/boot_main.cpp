@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <csignal>
 #include <functional>
 #include <chrono>
 #include <cmath>
@@ -45,6 +46,8 @@
 #endif
 #ifdef DREAM_WITH_RENDERER
 
+#include <GLES3/gl3.h>
+
 #include "dream/render/background.h"
 #include "dream/render/display_list.h"
 #include "dream/render/framebuffer.h"
@@ -55,6 +58,7 @@
 #include "dream/render/vk/present.h"
 #include "dream/render/vk/renderer.h"
 #include "dream/render/vk/window.h"
+using namespace dream::render::vk;
 #endif
 
 namespace {
@@ -63,6 +67,11 @@ namespace {
 std::string g_cache_dir;
 // --pipeline-keys: a port's list of the pipeline variants its game uses, made at start-up.
 std::string g_pipeline_keys;
+
+std::atomic<bool> g_signal_terminate{false};
+void signal_handler(int) {
+    g_signal_terminate.store(true, std::memory_order_relaxed);
+}
 
 struct StopRun {
     const char* why;
@@ -179,7 +188,8 @@ struct Live {
         target_size(render_aspect_, w, h);
         if (w == offscreen.width() && h == offscreen.height())
             return;
-        vkDeviceWaitIdle(window.context().device());
+        window.acquire_gl_context();
+        glFinish();
         // The presenter's sets name the old views by handle; the new ones may reuse the values.
         presenter.forget_views();
         overlay_presenter.forget_views();
@@ -209,6 +219,8 @@ struct Live {
         await_render = true;
         std::printf("window: render target now %ux%u (aspect %.3f)\n", w, h,
                     static_cast<double>(render_aspect_));
+        if (threaded_)
+            window.release_gl_context();
     }
 
     bool start(unsigned scale, const std::string& title, float render_aspect = 0.0f,
@@ -301,6 +313,7 @@ struct Live {
         std::printf("window: %s, drawing at %ux%u\n", window.context().caps().device_name.c_str(),
                     w, h);
         std::printf("window: presenting through %s\n", window.present_path().c_str());
+        window.release_gl_context();
         return true;
     }
 
@@ -683,10 +696,24 @@ public:
 
     void render_loop() {
         std::unique_lock<std::mutex> lock(jobs_mutex_);
+        bool context_held = false;
         for (;;) {
-            jobs_cv_.wait(lock, [this] { return quit_ || !jobs_.empty(); });
-            if (jobs_.empty())
-                return;  // asked to stop, and everything queued is drawn
+            if (jobs_.empty()) {
+                if (context_held) {
+                    window.release_gl_context();
+                    context_held = false;
+                }
+                jobs_cv_.wait(lock, [this] { return quit_ || !jobs_.empty(); });
+                if (jobs_.empty()) {
+                    if (context_held)
+                        window.release_gl_context();
+                    return;  // asked to stop, and everything queued is drawn
+                }
+            }
+            if (!context_held) {
+                window.acquire_gl_context();
+                context_held = true;
+            }
             RenderJob job = std::move(jobs_.front());
             jobs_.pop_front();
             busy_ = true;
@@ -717,20 +744,14 @@ public:
     // The fast path's present: the rendered frame sampled where it is, on the GPU.
     void present_job(const RenderJob& job) {
         std::uint32_t image = 0;
-        VkCommandBuffer cmd = VK_NULL_HANDLE;
-        if (!window.begin_frame(image, cmd)) {  // waits for a free image
+        VkCommandBuffer cmd = nullptr;
+        if (!window.begin_frame(image, cmd)) {
             window.recreate_swapchain();
             return;
         }
-        // A NextUI panel: the frame is blitted straight into fb0's page, with no pass of the
-        // panel's size drawn and copied after it. The image goes back to being sampled for
-        // whatever reads it next (a screenshot).
-        if (!present_blit(cmd)) {
-            begin_window_pass(cmd, image);
-            presenter.draw_view(cmd, offscreen.sampled_view(), offscreen.width(), offscreen.height(),
-                                window.extent());
-            vkCmdEndRenderPass(cmd);
-        }
+        begin_window_pass(cmd, image);
+        presenter.draw_view(cmd, offscreen.sampled_view(), offscreen.width(), offscreen.height(),
+                            window.extent());
         if (!window.end_frame(image))
             window.recreate_swapchain();
         last_present = std::chrono::steady_clock::now();
@@ -739,52 +760,13 @@ public:
             screenshot(job.shown, true, job.guest_frame);
     }
 
-    // The fast path's frame (sampled-from, as render() leaves it with readback off) blitted into
-    // the window's page where the window can (a NextUI panel), and back to sampled after.
-    bool present_blit(VkCommandBuffer cmd) {
-        if (!window.blits())
-            return false;
-        VkImageMemoryBarrier b{};
-        b.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        b.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        b.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        b.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        b.image = offscreen.colour_image();
-        b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
-        window.blit_frame(cmd, offscreen.colour_image(), offscreen.extent(), presenter.smooth);
-        std::swap(b.oldLayout, b.newLayout);
-        b.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
-                             0, nullptr, 1, &b);
-        return true;
-    }
-
-    void begin_window_pass(VkCommandBuffer cmd, std::uint32_t image) {
-        VkClearValue clears[2]{};
-        clears[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-        clears[1].depthStencil = {0.0f, 0};
-        VkRenderPassBeginInfo rpbi{};
-        rpbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rpbi.renderPass = window.render_pass();
-        rpbi.framebuffer = window.framebuffer(image);
-        rpbi.renderArea.extent = window.extent();
-        rpbi.clearValueCount = 2;
-        rpbi.pClearValues = clears;
-        vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
-        const VkViewport viewport{0.0f,
-                                  0.0f,
-                                  static_cast<float>(window.extent().width),
-                                  static_cast<float>(window.extent().height),
-                                  0.0f,
-                                  1.0f};
-        const VkRect2D scissor{{0, 0}, window.extent()};
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
+    void begin_window_pass(VkCommandBuffer, std::uint32_t) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, static_cast<GLsizei>(window.extent().width),
+                   static_cast<GLsizei>(window.extent().height));
+        glDisable(GL_SCISSOR_TEST);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
     }
 
     void render_to_texture(const dream::render::Frame& frame, const std::uint32_t* regs) {
@@ -842,6 +824,10 @@ public:
     // works on that same poll (its hotkeys are edges computed per poll, so a second poll would
     // lose them). Returns false when the user has closed the window.
     bool poll_input() {
+        if (g_signal_terminate.load(std::memory_order_relaxed)) {
+            window.request_close();
+            return window_open = false;
+        }
         input_polled = true;
         return window_open = window.poll();
     }
@@ -906,31 +892,27 @@ public:
             }
             drain();
         }
+        struct SynchronousContext {
+            dream::render::vk::Window& win;
+            bool active;
+            SynchronousContext(dream::render::vk::Window& w, bool act) : win(w), active(act) {
+                if (active)
+                    win.acquire_gl_context();
+            }
+            ~SynchronousContext() {
+                if (active)
+                    win.release_gl_context();
+            }
+        } sync_ctx(window, threaded_);
         if (interpolate && interp_ready && from_renderer && !offscreen.readback && !show_fps &&
             !menu.is_open() && !overlay_up) {
             interp_ready = false;
             std::uint32_t iimage = 0;
-            VkCommandBuffer icmd = VK_NULL_HANDLE;
+            VkCommandBuffer icmd = nullptr;
             if (window.begin_frame(iimage, icmd)) {
-                VkClearValue iclear[2]{};
-                iclear[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-                iclear[1].depthStencil = {0.0f, 0};
-                VkRenderPassBeginInfo ib{};
-                ib.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-                ib.renderPass = window.render_pass();
-                ib.framebuffer = window.framebuffer(iimage);
-                ib.renderArea.extent = window.extent();
-                ib.clearValueCount = 2;
-                ib.pClearValues = iclear;
-                vkCmdBeginRenderPass(icmd, &ib, VK_SUBPASS_CONTENTS_INLINE);
-                const VkViewport iv{0.0f, 0.0f, static_cast<float>(window.extent().width),
-                                    static_cast<float>(window.extent().height), 0.0f, 1.0f};
-                const VkRect2D isc{{0, 0}, window.extent()};
-                vkCmdSetViewport(icmd, 0, 1, &iv);
-                vkCmdSetScissor(icmd, 0, 1, &isc);
+                begin_window_pass(icmd, iimage);
                 presenter.draw_view(icmd, interp_off.sampled_view(), interp_off.width(),
                                     interp_off.height(), window.extent());
-                vkCmdEndRenderPass(icmd);
                 if (!window.end_frame(iimage))
                     window.recreate_swapchain();
                 // Half a guest frame (59.94 Hz) before the real one.
@@ -942,7 +924,7 @@ public:
             }
         }
         std::uint32_t image = 0;
-        VkCommandBuffer cmd = VK_NULL_HANDLE;
+        VkCommandBuffer cmd = nullptr;
         if (!window.begin_frame(image, cmd)) {
             window.recreate_swapchain();
             return true;
@@ -1008,26 +990,7 @@ public:
             overlay_presenter.upload(cmd, overlay_px, overlay_w, overlay_h);
             overlay_dirty = false;
         }
-        VkClearValue clears[2]{};
-        clears[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-        clears[1].depthStencil = {0.0f, 0};
-        VkRenderPassBeginInfo rpbi{};
-        rpbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rpbi.renderPass = window.render_pass();
-        rpbi.framebuffer = window.framebuffer(image);
-        rpbi.renderArea.extent = window.extent();
-        rpbi.clearValueCount = 2;
-        rpbi.pClearValues = clears;
-        vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
-        const VkViewport viewport{0.0f,
-                                  0.0f,
-                                  static_cast<float>(window.extent().width),
-                                  static_cast<float>(window.extent().height),
-                                  0.0f,
-                                  1.0f};
-        const VkRect2D scissor{{0, 0}, window.extent()};
-        vkCmdSetViewport(cmd, 0, 1, &viewport);
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        begin_window_pass(cmd, image);
         if (direct)
             presenter.draw_view(cmd, offscreen.sampled_view(), offscreen.width(), offscreen.height(),
                                 window.extent());
@@ -1035,7 +998,6 @@ public:
             presenter.draw(cmd, window.extent());
         if (overlay_px)
             overlay_presenter.draw(cmd, window.extent());
-        vkCmdEndRenderPass(cmd);
         if (!window.end_frame(image))
             window.recreate_swapchain();
         last_present = std::chrono::steady_clock::now();
@@ -1101,7 +1063,11 @@ public:
         // from the outside is indistinguishable from a crash.
         if (rearm_escape && !window.held(Control::Back)) {
             rearm_escape = false;
+#if defined(DREAMCOMP_PORTMASTER)
+            window.set_escape_quits(false);
+#else
             window.set_escape_quits(overlays.empty());  // an overlay owns escape
+#endif
         }
         // an overlay host has its own controls screen and gives F1 to the HUD editor.
         // The key is polled here, not taken from the event the overlay consumed, so it has to be
@@ -1368,7 +1334,10 @@ public:
     bool have_frame = false, from_renderer = false, reported_error = false;
     bool threaded() const noexcept { return threaded_; }
 
-    ~Live() { stop_render_thread(); }
+    ~Live() {
+        stop_render_thread();
+        window.acquire_gl_context();
+    }
 
 private:
     bool threaded_ = false;
@@ -1499,6 +1468,8 @@ void precise_sleep_until(std::chrono::steady_clock::time_point t);
 
 int main(int argc, char** argv) {
     install_crash_handler();
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
     // Extensions may rewrite the command line before it is parsed (host_ext.h). The rewritten
     // strings must outlive every pointer taken into them below, hence the statics.
     static std::vector<std::string> ext_args;
@@ -2345,6 +2316,13 @@ int main(int argc, char** argv) {
         std::fprintf(hash_file, "# frame cycles hash writes\n");
     }
     tick = sys.sched.add("watchdog", [&](std::uint64_t now, std::uint64_t) {
+        if (g_signal_terminate.load(std::memory_order_relaxed)) {
+#ifdef DREAM_WITH_RENDERER
+            if (live)
+                live->window.request_close();
+#endif
+            quit_requested = true;
+        }
         if (hash_file && sys.spg.frames() != hashed_frame) {
             hashed_frame = sys.spg.frames();
             std::fprintf(hash_file, "%llu %llu %016llx %llu\n",

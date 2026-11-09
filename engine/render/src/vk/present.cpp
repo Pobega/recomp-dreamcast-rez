@@ -1,31 +1,90 @@
-// See present.h.
 #include "dream/render/vk/present.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
-
-#include "present_frag.h"
-#include "present_vert.h"
+#include <GLES3/gl3.h>
 
 namespace dream::render::vk {
 
 namespace {
 
-struct PushConstants {
-    float scale[2];
-    float offset[2];
-    float texel[2];  // one source texel in texture coordinates
-    float taps[2];   // source texels per output pixel, per axis; 1 or less when magnifying
-    float mode[2];   // x: 1 keeps the texture's alpha (overlay layer), 0 writes opaque
-};
+constexpr const char* kPresentVertSrc = R"(#version 300 es
+precision highp float;
 
-VkShaderModule make_module(VkDevice device, const std::uint32_t* code, std::size_t bytes) {
-    VkShaderModuleCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    ci.codeSize = bytes;
-    ci.pCode = code;
-    VkShaderModule m = VK_NULL_HANDLE;
-    vkCreateShaderModule(device, &ci, nullptr, &m);
-    return m;
+uniform vec2 u_scale;
+uniform vec2 u_offset;
+
+out vec2 v_uv;
+
+void main() {
+    v_uv = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    const vec2 pos = v_uv * 2.0 - 1.0;
+    const vec2 p = pos * u_scale + u_offset;
+    gl_Position = vec4(p.x, -p.y, 0.0, 1.0);
+}
+)";
+
+constexpr const char* kPresentFragSrc = R"(#version 300 es
+precision highp float;
+precision lowp sampler2D;
+
+uniform sampler2D u_image;
+uniform vec2 u_scale;
+uniform vec2 u_offset;
+uniform vec2 u_texel;
+uniform vec2 u_taps;
+uniform vec2 u_mode;
+
+in vec2 v_uv;
+out vec4 colour;
+
+const int kMaxTaps = 4;
+
+void main() {
+    if (any(lessThan(v_uv, vec2(0.0))) || any(greaterThan(v_uv, vec2(1.0))))
+        discard;
+    const ivec2 n = ivec2(clamp(ceil(u_taps - 0.05), vec2(1.0), vec2(float(kMaxTaps))));
+    if (n.x == 1 && n.y == 1) {
+        const vec4 t = texture(u_image, v_uv);
+        colour = u_mode.x > 0.5 ? t : vec4(t.rgb, 1.0);
+        return;
+    }
+    const vec2 first = v_uv - 0.5 * (vec2(n) - 1.0) * u_texel;
+    vec4 sum = vec4(0.0);
+    for (int y = 0; y < n.y; ++y)
+        for (int x = 0; x < n.x; ++x)
+            sum += texture(u_image, first + vec2(float(x), float(y)) * u_texel);
+    sum /= float(n.x * n.y);
+    colour = u_mode.x > 0.5 ? sum : vec4(sum.rgb, 1.0);
+}
+)";
+
+GLuint compile_shader(GLenum type, const char* src) {
+    const GLuint s = glCreateShader(type);
+    glShaderSource(s, 1, &src, nullptr);
+    glCompileShader(s);
+    GLint ok = GL_FALSE;
+    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        glDeleteShader(s);
+        return 0;
+    }
+    return s;
+}
+
+GLuint link_program(GLuint vs, GLuint fs) {
+    const GLuint p = glCreateProgram();
+    glAttachShader(p, vs);
+    glAttachShader(p, fs);
+    glLinkProgram(p);
+    GLint ok = GL_FALSE;
+    glGetProgramiv(p, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        glDeleteProgram(p);
+        return 0;
+    }
+    return p;
 }
 
 }  // namespace
@@ -34,412 +93,194 @@ Presenter::~Presenter() {
     destroy();
 }
 
-bool Presenter::create(Context& ctx, VkRenderPass render_pass) {
+bool Presenter::create(Context& ctx, VkRenderPass) {
+    destroy();
     ctx_ = &ctx;
-    render_pass_ = render_pass;
-    VkDevice dev = ctx.device();
 
-    VkDescriptorSetLayoutBinding binding{};
-    binding.binding = 0;
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    binding.descriptorCount = 1;
-    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutCreateInfo dslci{};
-    dslci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslci.bindingCount = 1;
-    dslci.pBindings = &binding;
-    if (vkCreateDescriptorSetLayout(dev, &dslci, nullptr, &set_layout_) != VK_SUCCESS) {
-        error_ = "vkCreateDescriptorSetLayout failed for the presenter";
-        return false;
-    }
-    VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 + kExtSets};
-    VkDescriptorPoolCreateInfo dpci{};
-    dpci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    dpci.maxSets = 1 + kExtSets;  // the uploaded image, and draw_view's ring
-    dpci.poolSizeCount = 1;
-    dpci.pPoolSizes = &size;
-    if (vkCreateDescriptorPool(dev, &dpci, nullptr, &pool_) != VK_SUCCESS) {
-        error_ = "vkCreateDescriptorPool failed for the presenter";
-        return false;
-    }
-    VkDescriptorSetAllocateInfo dsai{};
-    dsai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    dsai.descriptorPool = pool_;
-    dsai.descriptorSetCount = 1;
-    dsai.pSetLayouts = &set_layout_;
-    bool sets_ok = vkAllocateDescriptorSets(dev, &dsai, &set_) == VK_SUCCESS;
-    for (auto& s : ext_sets_)
-        sets_ok = sets_ok && vkAllocateDescriptorSets(dev, &dsai, &s) == VK_SUCCESS;
-    if (!sets_ok) {
-        error_ = "vkAllocateDescriptorSets failed for the presenter";
+    const GLuint vs = compile_shader(GL_VERTEX_SHADER, kPresentVertSrc);
+    const GLuint fs = compile_shader(GL_FRAGMENT_SHADER, kPresentFragSrc);
+    if (!vs || !fs) {
+        if (vs) glDeleteShader(vs);
+        if (fs) glDeleteShader(fs);
+        error_ = "present shader compilation failed";
         return false;
     }
 
-    VkSamplerCreateInfo sci{};
-    sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sci.magFilter = smooth ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
-    sci.minFilter = sci.magFilter;
-    sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sci.addressModeV = sci.addressModeU;
-    sci.addressModeW = sci.addressModeU;
-    sci.maxLod = VK_LOD_CLAMP_NONE;
-    if (vkCreateSampler(dev, &sci, nullptr, &sampler_) != VK_SUCCESS) {
-        error_ = "vkCreateSampler failed for the presenter";
+    program_ = link_program(vs, fs);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+
+    if (!program_) {
+        error_ = "present program linking failed";
         return false;
     }
 
-    // Both stages share one range: the vertex shader fits the quad, the fragment shader
-    // resolves with it.
-    VkPushConstantRange range{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                              sizeof(PushConstants)};
-    VkPipelineLayoutCreateInfo plci{};
-    plci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    plci.setLayoutCount = 1;
-    plci.pSetLayouts = &set_layout_;
-    plci.pushConstantRangeCount = 1;
-    plci.pPushConstantRanges = &range;
-    if (vkCreatePipelineLayout(dev, &plci, nullptr, &layout_) != VK_SUCCESS) {
-        error_ = "vkCreatePipelineLayout failed for the presenter";
-        return false;
-    }
+    u_scale_ = glGetUniformLocation(program_, "u_scale");
+    u_offset_ = glGetUniformLocation(program_, "u_offset");
+    u_texel_ = glGetUniformLocation(program_, "u_texel");
+    u_taps_ = glGetUniformLocation(program_, "u_taps");
+    u_mode_ = glGetUniformLocation(program_, "u_mode");
+    u_image_ = glGetUniformLocation(program_, "u_image");
 
-    vs_ = make_module(dev, present_vert, sizeof present_vert);
-    fs_ = make_module(dev, present_frag, sizeof present_frag);
-    if (!vs_ || !fs_) {
-        error_ = "the presentation shaders would not load";
-        return false;
-    }
-
-    VkPipelineShaderStageCreateInfo stages[2]{};
-    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = vs_;
-    stages[0].pName = "main";
-    stages[1] = stages[0];
-    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = fs_;
-
-    // No vertex buffer: the triangle's corners come from gl_VertexIndex.
-    VkPipelineVertexInputStateCreateInfo vi{};
-    vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VkPipelineInputAssemblyStateCreateInfo ia{};
-    ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPipelineViewportStateCreateInfo vp{};
-    vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    vp.viewportCount = 1;
-    vp.scissorCount = 1;
-    VkPipelineRasterizationStateCreateInfo rs{};
-    rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rs.polygonMode = VK_POLYGON_MODE_FILL;
-    rs.cullMode = VK_CULL_MODE_NONE;
-    rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rs.lineWidth = 1.0f;
-    VkPipelineMultisampleStateCreateInfo ms{};
-    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    // The finished frame owns every pixel it covers: no depth test, no blending.
-    VkPipelineDepthStencilStateCreateInfo ds{};
-    ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    VkPipelineColorBlendAttachmentState blend{};
-    blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    if (overlay_layer) {  // premultiplied "over"
-        blend.blendEnable = VK_TRUE;
-        blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        blend.colorBlendOp = VK_BLEND_OP_ADD;
-        blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        blend.alphaBlendOp = VK_BLEND_OP_ADD;
-    }
-    VkPipelineColorBlendStateCreateInfo cb{};
-    cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    cb.attachmentCount = 1;
-    cb.pAttachments = &blend;
-    const VkDynamicState dynamic[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dy{};
-    dy.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dy.dynamicStateCount = 2;
-    dy.pDynamicStates = dynamic;
-
-    VkGraphicsPipelineCreateInfo gpci{};
-    gpci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    gpci.stageCount = 2;
-    gpci.pStages = stages;
-    gpci.pVertexInputState = &vi;
-    gpci.pInputAssemblyState = &ia;
-    gpci.pViewportState = &vp;
-    gpci.pRasterizationState = &rs;
-    gpci.pMultisampleState = &ms;
-    gpci.pDepthStencilState = &ds;
-    gpci.pColorBlendState = &cb;
-    gpci.pDynamicState = &dy;
-    gpci.layout = layout_;
-    gpci.renderPass = render_pass_;
-    if (vkCreateGraphicsPipelines(dev, VK_NULL_HANDLE, 1, &gpci, nullptr, &pipeline_) !=
-        VK_SUCCESS) {
-        error_ = "vkCreateGraphicsPipelines failed for the presenter";
-        return false;
-    }
+    glGenVertexArrays(1, &vao_);
     return true;
-}
-
-void Presenter::destroy_image() {
-    if (!ctx_ || !ctx_->device())
-        return;
-    VkDevice dev = ctx_->device();
-    if (view_)
-        vkDestroyImageView(dev, view_, nullptr);
-    if (image_)
-        vkDestroyImage(dev, image_, nullptr);
-    if (memory_)
-        vkFreeMemory(dev, memory_, nullptr);
-    view_ = VK_NULL_HANDLE;
-    image_ = VK_NULL_HANDLE;
-    memory_ = VK_NULL_HANDLE;
-    width_ = height_ = 0;
-    uploaded_ = false;
 }
 
 void Presenter::destroy() {
-    if (ctx_ && ctx_->device()) {
-        VkDevice dev = ctx_->device();
-        vkDeviceWaitIdle(dev);  // the last frames may still be sampling with this pipeline
-        destroy_image();
-        if (pipeline_)
-            vkDestroyPipeline(dev, pipeline_, nullptr);
-        if (layout_)
-            vkDestroyPipelineLayout(dev, layout_, nullptr);
-        if (vs_)
-            vkDestroyShaderModule(dev, vs_, nullptr);
-        if (fs_)
-            vkDestroyShaderModule(dev, fs_, nullptr);
-        if (sampler_)
-            vkDestroySampler(dev, sampler_, nullptr);
-        if (pool_)
-            vkDestroyDescriptorPool(dev, pool_, nullptr);  // frees set_ with it
-        if (set_layout_)
-            vkDestroyDescriptorSetLayout(dev, set_layout_, nullptr);
+    if (tex_) {
+        glDeleteTextures(1, &tex_);
+        tex_ = 0;
     }
-    pipeline_ = VK_NULL_HANDLE;
-    layout_ = VK_NULL_HANDLE;
-    vs_ = fs_ = VK_NULL_HANDLE;
-    sampler_ = VK_NULL_HANDLE;
-    pool_ = VK_NULL_HANDLE;
-    set_ = VK_NULL_HANDLE;
-    for (unsigned i = 0; i < kExtSets; ++i) {
-        ext_sets_[i] = VK_NULL_HANDLE;
-        ext_views_[i] = VK_NULL_HANDLE;
+    if (vao_) {
+        glDeleteVertexArrays(1, &vao_);
+        vao_ = 0;
     }
-    ext_next_ = 0;
-    set_layout_ = VK_NULL_HANDLE;
-    staging_.destroy();
-    ctx_ = nullptr;
+    if (program_) {
+        glDeleteProgram(program_);
+        program_ = 0;
+    }
+    uploaded_width_ = 0;
+    uploaded_height_ = 0;
+    staging_.clear();
 }
 
-bool Presenter::ensure_image(std::uint32_t width, std::uint32_t height) {
-    if (image_ && width == width_ && height == height_)
-        return true;
-    destroy_image();
-    VkDevice dev = ctx_->device();
+bool Presenter::upload(VkCommandBuffer, const std::uint32_t* rgba, std::uint32_t width,
+                       std::uint32_t height,
+                       const std::function<void(std::uint32_t* pixels, std::uint32_t width,
+                                                std::uint32_t height)>& decorate) {
+    if (width == 0 || height == 0)
+        return false;
 
-    VkImageCreateInfo ici{};
-    ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ici.imageType = VK_IMAGE_TYPE_2D;
-    ici.format = VK_FORMAT_R8G8B8A8_UNORM;
-    ici.extent = {width, height, 1};
-    ici.mipLevels = 1;
-    ici.arrayLayers = 1;
-    ici.samples = VK_SAMPLE_COUNT_1_BIT;
-    ici.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ici.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    if (vkCreateImage(dev, &ici, nullptr, &image_) != VK_SUCCESS) {
-        error_ = "vkCreateImage failed for the presenter";
-        return false;
-    }
-    VkMemoryRequirements req{};
-    vkGetImageMemoryRequirements(dev, image_, &req);
-    const std::uint32_t type = find_memory_type(ctx_->physical_device(), req.memoryTypeBits,
-                                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (type == UINT32_MAX) {
-        error_ = "no device-local memory for the presenter's image";
-        return false;
-    }
-    VkMemoryAllocateInfo mai{};
-    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    mai.allocationSize = req.size;
-    mai.memoryTypeIndex = type;
-    if (vkAllocateMemory(dev, &mai, nullptr, &memory_) != VK_SUCCESS) {
-        error_ = "vkAllocateMemory failed for the presenter's image";
-        return false;
-    }
-    vkBindImageMemory(dev, image_, memory_, 0);
-
-    VkImageViewCreateInfo vci{};
-    vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vci.image = image_;
-    vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    vci.format = VK_FORMAT_R8G8B8A8_UNORM;
-    vci.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    if (vkCreateImageView(dev, &vci, nullptr, &view_) != VK_SUCCESS) {
-        error_ = "vkCreateImageView failed for the presenter";
-        return false;
+    if (!tex_ || width != uploaded_width_ || height != uploaded_height_) {
+        if (tex_)
+            glDeleteTextures(1, &tex_);
+        glGenTextures(1, &tex_);
+        glBindTexture(GL_TEXTURE_2D, tex_);
+        glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
+        const GLenum filter = smooth ? GL_LINEAR : GL_NEAREST;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        uploaded_width_ = width;
+        uploaded_height_ = height;
     }
 
-    VkDescriptorImageInfo dii{};
-    dii.sampler = sampler_;
-    dii.imageView = view_;
-    dii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set_;
-    write.dstBinding = 0;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    write.pImageInfo = &dii;
-    vkUpdateDescriptorSets(dev, 1, &write, 0, nullptr);
-
-    width_ = width;
-    height_ = height;
-    return true;
-}
-
-bool Presenter::upload(
-    VkCommandBuffer cmd, const std::uint32_t* rgba, std::uint32_t width, std::uint32_t height,
-    const std::function<void(std::uint32_t*, std::uint32_t, std::uint32_t)>& decorate) {
-    if (!ctx_ || !rgba || width == 0 || height == 0)
-        return false;
-    if (!ensure_image(width, height))
-        return false;
-    const VkDeviceSize bytes = static_cast<VkDeviceSize>(width) * height * 4;
-    if (!staging_.ensure(*ctx_, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT)) {
-        error_ = "could not allocate the presenter's staging buffer";
-        return false;
+    const std::uint32_t* src_px = rgba;
+    if (decorate) {
+        staging_.resize(static_cast<std::size_t>(width) * height);
+        if (rgba)
+            std::memcpy(staging_.data(), rgba, staging_.size() * sizeof(std::uint32_t));
+        else
+            std::memset(staging_.data(), 0, staging_.size() * sizeof(std::uint32_t));
+        decorate(staging_.data(), width, height);
+        src_px = staging_.data();
     }
-    staging_.write(rgba, static_cast<std::size_t>(bytes));
-    if (decorate)
-        decorate(static_cast<std::uint32_t*>(staging_.mapped()), width, height);
 
-    // The image was either just created (undefined) or read by the fragment shader last frame.
-    // Either way it becomes a transfer destination, and the copy waits for that read to finish.
-    VkImageMemoryBarrier to_dst{};
-    to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    to_dst.oldLayout =
-        uploaded_ ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED;
-    to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_dst.image = image_;
-    to_dst.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    to_dst.srcAccessMask = uploaded_ ? VK_ACCESS_SHADER_READ_BIT : 0;
-    to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    vkCmdPipelineBarrier(
-        cmd, uploaded_ ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &to_dst);
-
-    VkBufferImageCopy copy{};
-    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    copy.imageExtent = {width, height, 1};
-    vkCmdCopyBufferToImage(cmd, staging_.handle(), image_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                           &copy);
-
-    VkImageMemoryBarrier to_read = to_dst;
-    to_read.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    to_read.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    to_read.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0, 0, nullptr, 0, nullptr, 1, &to_read);
-    uploaded_ = true;
+    if (src_px) {
+        glBindTexture(GL_TEXTURE_2D, tex_);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height),
+                        GL_RGBA, GL_UNSIGNED_BYTE, src_px);
+    }
     return true;
 }
 
 bool Presenter::draw(VkCommandBuffer cmd, VkExtent2D target) {
-    if (!uploaded_)
+    if (!tex_)
         return false;
-    return draw_set(cmd, set_, width_, height_, target);
+    return draw_view(cmd, static_cast<VkImageView>(tex_), uploaded_width_, uploaded_height_, target);
 }
 
-bool Presenter::draw_view(VkCommandBuffer cmd, VkImageView view, std::uint32_t width,
-                          std::uint32_t height, VkExtent2D target) {
-    const unsigned slot = ext_next_;
-    if (!view || !ext_sets_[slot])
+bool Presenter::draw_view(VkCommandBuffer, VkImageView view, std::uint32_t width,
+                         std::uint32_t height, VkExtent2D target) {
+    if (!program_ || width == 0 || height == 0 || target.width == 0 || target.height == 0)
         return false;
-    ext_next_ = (ext_next_ + 1) % kExtSets;
-    VkDescriptorSet const ext_set_ = ext_sets_[slot];
-    if (view != ext_views_[slot]) {
-        VkDescriptorImageInfo dii{};
-        dii.sampler = sampler_;
-        dii.imageView = view;
-        dii.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = ext_set_;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.pImageInfo = &dii;
-        vkUpdateDescriptorSets(ctx_->device(), 1, &write, 0, nullptr);
-        ext_views_[slot] = view;
-    }
-    return draw_set(cmd, ext_set_, width, height, target);
-}
 
-bool Presenter::draw_set(VkCommandBuffer cmd, VkDescriptorSet set, std::uint32_t src_width,
-                         std::uint32_t src_height, VkExtent2D target) {
-    if (!pipeline_ || target.width == 0 || target.height == 0)
-        return false;
-    // Fit the guest's aspect ratio inside the window: shrink whichever axis has room to spare
-    // (letterbox), grow the other one past the edges (crop), or neither (stretch).
-    PresentOptions layer_opts;
-    layer_opts.fit = PresentOptions::Fit::Stretch;
-    const auto& opts = overlay_layer ? layer_opts : present_options();
-    const float image_aspect = opts.display_aspect > 0.0f
-                                   ? opts.display_aspect
-                                   : static_cast<float>(src_width) / static_cast<float>(src_height);
-    const float target_aspect =
-        static_cast<float>(target.width) / static_cast<float>(target.height);
-    PushConstants push{{1.0f, 1.0f}, {0.0f, 0.0f}, {0.0f, 0.0f}, {1.0f, 1.0f},
-                       {overlay_layer ? 1.0f : 0.0f, 0.0f}};
-    switch (opts.fit) {
-        case PresentOptions::Fit::Letterbox:
-            if (target_aspect > image_aspect)
-                push.scale[0] = image_aspect / target_aspect;
-            else
-                push.scale[1] = target_aspect / image_aspect;
-            break;
-        case PresentOptions::Fit::Crop:
-            if (target_aspect > image_aspect)
-                push.scale[1] = target_aspect / image_aspect;
-            else
-                push.scale[0] = image_aspect / target_aspect;
-            break;
-        case PresentOptions::Fit::Stretch:
-            break;
+    float scale[2] = {1.0f, 1.0f};
+    float offset[2] = {0.0f, 0.0f};
+
+    if (overlay_layer) {
+        scale[0] = 1.0f;
+        scale[1] = 1.0f;
+    } else {
+        const auto& opts = present_options();
+        const float src_aspect = opts.display_aspect > 0.0f
+                                     ? opts.display_aspect
+                                     : (static_cast<float>(width) / static_cast<float>(height));
+        const float dst_aspect = static_cast<float>(target.width) / static_cast<float>(target.height);
+
+        switch (opts.fit) {
+            case PresentOptions::Fit::Stretch:
+                scale[0] = 1.0f;
+                scale[1] = 1.0f;
+                break;
+            case PresentOptions::Fit::Crop:
+                if (dst_aspect > src_aspect) {
+                    scale[0] = 1.0f;
+                    scale[1] = dst_aspect / src_aspect;
+                } else {
+                    scale[0] = src_aspect / dst_aspect;
+                    scale[1] = 1.0f;
+                }
+                break;
+            case PresentOptions::Fit::Letterbox:
+            default:
+                if (dst_aspect > src_aspect) {
+                    scale[0] = src_aspect / dst_aspect;
+                    scale[1] = 1.0f;
+                } else {
+                    scale[0] = 1.0f;
+                    scale[1] = dst_aspect / src_aspect;
+                }
+                break;
+        }
     }
 
-    // How many source pixels each drawn pixel covers. --scale draws the guest's 640x480 at a
-    // multiple of that and the window is usually smaller than the result, so this is normally
-    // above 1 and the fragment shader averages rather than picking one sample out of several.
-    // Measured against the drawn area rather than the whole window, because letterboxing means
-    // they are not the same thing.
-    const float drawn_w = static_cast<float>(target.width) * push.scale[0];
-    const float drawn_h = static_cast<float>(target.height) * push.scale[1];
-    push.texel[0] = 1.0f / static_cast<float>(src_width);
-    push.texel[1] = 1.0f / static_cast<float>(src_height);
-    if (drawn_w > 0.0f)
-        push.taps[0] = static_cast<float>(src_width) / drawn_w;
-    if (drawn_h > 0.0f)
-        push.taps[1] = static_cast<float>(src_height) / drawn_h;
+    const float out_w = static_cast<float>(target.width) * scale[0];
+    const float out_h = static_cast<float>(target.height) * scale[1];
+    const float taps[2] = {
+        std::max(1.0f, static_cast<float>(width) / std::max(1.0f, out_w)),
+        std::max(1.0f, static_cast<float>(height) / std::max(1.0f, out_h)),
+    };
+    const float texel[2] = {
+        1.0f / static_cast<float>(width),
+        1.0f / static_cast<float>(height),
+    };
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 1, &set, 0, nullptr);
-    vkCmdPushConstants(cmd, layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                       sizeof push, &push);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    glUseProgram(program_);
+    if (u_scale_ >= 0)
+        glUniform2f(u_scale_, scale[0], scale[1]);
+    if (u_offset_ >= 0)
+        glUniform2f(u_offset_, offset[0], offset[1]);
+    if (u_texel_ >= 0)
+        glUniform2f(u_texel_, texel[0], texel[1]);
+    if (u_taps_ >= 0)
+        glUniform2f(u_taps_, taps[0], taps[1]);
+    if (u_mode_ >= 0)
+        glUniform2f(u_mode_, overlay_layer ? 1.0f : 0.0f, 0.0f);
+    if (u_image_ >= 0)
+        glUniform1i(u_image_, 0);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(view));
+    glBindSampler(0, 0);
+
+    if (overlay_layer) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    } else {
+        glDisable(GL_BLEND);
+    }
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+
+    glBindVertexArray(vao_);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+
+    if (overlay_layer)
+        glDisable(GL_BLEND);
+
     return true;
 }
 

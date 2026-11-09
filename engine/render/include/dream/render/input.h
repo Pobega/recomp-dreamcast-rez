@@ -73,14 +73,19 @@ struct Binding {
 constexpr unsigned kBindingSlots = 2;
 
 struct DeviceBindings {
-    std::array<Binding, kPadControlCount> b{};
-    std::array<Binding, kPadControlCount> alt{};  // the second slot
-    const Binding& operator[](PadControl c) const { return b[static_cast<unsigned>(c)]; }
-    Binding& operator[](PadControl c) { return b[static_cast<unsigned>(c)]; }
+    struct SlotArray : std::array<Binding, kPadControlCount> {
+        using std::array<Binding, kPadControlCount>::operator[];
+        const Binding& operator[](PadControl c) const { return (*this)[static_cast<unsigned>(c)]; }
+        Binding& operator[](PadControl c) { return (*this)[static_cast<unsigned>(c)]; }
+    };
+    SlotArray b{};
+    SlotArray alt{};  // the second slot
+    const Binding& operator[](PadControl c) const { return b[c]; }
+    Binding& operator[](PadControl c) { return b[c]; }
     const Binding& slot(PadControl c, unsigned s) const {
-        return (s == 0 ? b : alt)[static_cast<unsigned>(c)];
+        return (s == 0 ? b : alt)[c];
     }
-    Binding& slot(PadControl c, unsigned s) { return (s == 0 ? b : alt)[static_cast<unsigned>(c)]; }
+    Binding& slot(PadControl c, unsigned s) { return (s == 0 ? b : alt)[c]; }
 };
 
 struct Bindings {

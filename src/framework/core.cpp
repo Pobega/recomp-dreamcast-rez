@@ -28,12 +28,8 @@
 #include "dreamcomp/hud.h"
 #include "dreamcomp/sharp2d.h"
 #include "dreamcomp/settings.h"
-
-
-#ifdef DREAMCOMP_NEXTUI
-#include "dream/runtime/pvr/core.h"
-#include "nextui/disc_flow.h"
-#endif
+#include "dream/translator/config/game_config.h"
+#include "nextui/disc_folder.h"
 
 #if __has_include("dream/render/vk/present.h") && defined(DREAM_WITH_RENDERER)
 #include "dream/render/vk/present.h"
@@ -53,9 +49,8 @@ namespace {
 const PortInfo* g_port = nullptr;
 Settings g_settings;
 // The highest render scale and the default; a settings file asking for more is held to it.
-#if defined(DREAMCOMP_NEXTUI)
-// A NextUI handheld (the Brick: a 1024x768 panel, a PowerVR GE8300): the Dreamcast's own 640x480
-// by default, or the panel's own ("panel").
+#if defined(DREAMCOMP_PORTMASTER)
+// A handheld: the Dreamcast's own 640x480 by default, or the panel's own ("panel").
 constexpr int kMaxScale = 2;
 constexpr int kDefaultScale = 1;
 #else
@@ -70,7 +65,7 @@ int scale_setting() {
     if (g_settings.get("scale") == "panel")
         return kScalePanel;
     const int scale = std::clamp(g_settings.get_int("scale", kDefaultScale), 1, kMaxScale);
-#ifdef DREAMCOMP_NEXTUI
+#if defined(DREAMCOMP_PORTMASTER)
     // A handheld's choices are 640x480 and the panel's own; a saved 2 reads as the panel's
     // (--scale 2 still draws 1280x960).
     if (scale > 1)
@@ -107,7 +102,6 @@ std::string flag_value(const std::vector<std::string>& a, const char* f) {
     return {};
 }
 
-#ifdef DREAMCOMP_NEXTUI
 // Removes every `f` (and its value when `takes_value`) so the engine never sees the flag.
 void drop_flag(std::vector<std::string>& a, const char* f, bool takes_value) {
     for (std::size_t i = 1; i < a.size();) {
@@ -118,7 +112,6 @@ void drop_flag(std::vector<std::string>& a, const char* f, bool takes_value) {
             ++i;
     }
 }
-#endif
 
 // `rumble` (0-100, default 100) -> --rumble N; `volume` (0-100) -> --volume N; `cpu_speed` (1-16,
 // default the port's) -> --cpu-speed N; `mods = a,b` -> --mod <config dir>/mods/a ...
@@ -233,6 +226,35 @@ float expanded_target(float window_aspect) {
     return std::clamp(a, 4.0f / 3.0f, g_port ? g_port->max_aspect : 4.0f / 3.0f);
 }
 
+std::filesystem::path find_disc_in_folders(const std::string& config_path,
+                                           const std::filesystem::path& base_dir,
+                                           const std::string& custom_dir) {
+    if (config_path.empty())
+        return {};
+    dream::translator::GameConfig cfg;
+    std::string err;
+    if (!dream::translator::load_game_config(config_path, cfg, err))
+        return {};
+
+    std::vector<std::filesystem::path> search_dirs;
+    if (!custom_dir.empty())
+        search_dirs.push_back(custom_dir);
+    search_dirs.push_back(base_dir / "gamedata");
+    search_dirs.push_back(base_dir / "disc");
+
+    for (const auto& dir : search_dirs) {
+        std::error_code ec;
+        if (!std::filesystem::exists(dir, ec))
+            continue;
+        const auto files = nextui::scan_disc_folder(dir, cfg.chd_images);
+        for (const auto& f : files) {
+            if (f.image >= 0)
+                return f.path;
+        }
+    }
+    return {};
+}
+
 class Core final : public dream::host::Extension {
 public:
     const char* name() const override { return "rez"; }
@@ -243,7 +265,11 @@ public:
         const std::filesystem::path config_dir =
             default_config_dir(g_port && g_port->folder ? g_port->folder : id);
         // Double-clicked: the play path with the saved settings.
+#if defined(DREAMCOMP_PORTMASTER)
+        const bool play = bare || !has_flag(args, "--max-frames");
+#else
         const bool play = bare;
+#endif
 
         std::filesystem::path file = flag_value(args, "--settings");
         if (file.empty())
@@ -262,29 +288,25 @@ public:
                 }
             }
         }
-#ifdef DREAMCOMP_NEXTUI
-        // A NextUI handheld: the image comes from the disc folder beside the executable
-        // (--disc-dir: another), chosen on the device's screens, and "Starting ..." stays up until
-        // the game's first picture (on_vblank). A run given --disc skips them.
         {
-            nextui::DiscFlow flow;
-            flow.disc_dir = flag_value(args, "--disc-dir");
+            const std::string disc_dir_arg = flag_value(args, "--disc-dir");
             drop_flag(args, "--disc-dir", true);
-            if (flow.disc_dir.empty())
-                flow.disc_dir = exe_dir(args[0]) / "disc";
             if (!has_flag(args, "--disc")) {
-                flow.config = flag_value(args, "--config");
-                flow.request = g_port ? g_port->disc_request : nullptr;
-                flow.exiting = g_port ? g_port->exit_message : nullptr;
-                const auto disc = nextui::choose_disc(flow);
-                std::fflush(stdout);
-                if (disc.empty())
-                    std::exit(0);
-                args.push_back("--disc");
-                args.push_back(disc.string());
+                const std::string saved_disc = g_settings.get("disc");
+                std::error_code ec;
+                if (!saved_disc.empty() && std::filesystem::exists(saved_disc, ec)) {
+                    args.push_back("--disc");
+                    args.push_back(saved_disc);
+                } else {
+                    const auto disc = find_disc_in_folders(
+                        flag_value(args, "--config"), exe_dir(args[0]), disc_dir_arg);
+                    if (!disc.empty()) {
+                        args.push_back("--disc");
+                        args.push_back(disc.string());
+                    }
+                }
             }
         }
-#endif
         // `--set` is parsed after this, but the texture keys decide which engine flags to add
         // here, so those two are applied now. parse_arg sets them again to the same value, and a
         // setting only becomes dirty once, so --save-settings behaves as it does for any key.
@@ -358,7 +380,8 @@ public:
 
         if (!has_flag(args, "--disc")) {
             const std::string disc = g_settings.get("disc");
-            if (!disc.empty()) {
+            std::error_code ec;
+            if (!disc.empty() && std::filesystem::exists(disc, ec)) {
                 args.push_back("--disc");
                 args.push_back(disc);
             }
@@ -394,12 +417,10 @@ public:
                     args.push_back("--cache-dir");
                     args.push_back(dir.string());
                 }
-#ifndef DREAMCOMP_NEXTUI
                 if (!has_flag(args, "--bindings")) {
                     args.push_back("--bindings");
                     args.push_back((dir / "bindings.txt").string());
                 }
-#endif
             }
             // The port's list of the pipeline variants its game uses, built at startup
             // (<id>-pipelines.txt beside the executable, or in game/ in a build tree).
@@ -511,23 +532,6 @@ public:
 
     void on_vblank(dream::System& sys) override {
         ++vblanks_;
-#ifdef DREAMCOMP_NEXTUI
-        // The start screen gives way at the game's first picture (the port's count of them, else
-        // the PowerVR model's framebuffer flips). A build without a picture says so, then ends the run.
-        if (nextui::start_screen_up()) {
-            const std::uint64_t shown = g_port && g_port->pictures_shown ? g_port->pictures_shown()
-                                        : (sys.pvr_core ? sys.pvr_core->frame_swaps : 0);
-            if (shown > 0) {
-#ifdef DREAM_WITH_RENDERER
-                nextui::game_started(vblanks_, true);
-#else
-                nextui::game_started(vblanks_, false);
-                if (dream::host::host_controls().quit)
-                    dream::host::host_controls().quit();
-#endif
-            }
-        }
-#endif
         follow_window();
         if (g_port && g_port->widescreen)
             g_port->widescreen(sys, widescreen() ? target_aspect() : 4.0f / 3.0f);
@@ -740,9 +744,6 @@ public:
     }
 
     void on_stop(dream::System& sys, const char* why) override {
-#ifdef DREAMCOMP_NEXTUI
-        nextui::game_ending();
-#endif
         if (g_port && g_port->on_stop)
             g_port->on_stop(sys, g_settings);
         (void)sys, (void)why;
@@ -813,7 +814,7 @@ void set_render_scale(int scale) {
 }
 
 int render_scale_high() {
-#ifdef DREAMCOMP_NEXTUI
+#if defined(DREAMCOMP_PORTMASTER)
     return kScalePanel;  // the panel's pixels one to one
 #else
     return 2;

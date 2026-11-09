@@ -159,6 +159,8 @@ Bindings Bindings::defaults() {
     k.gamepad[PadControl::Right] = btn("dpright");
     k.gamepad[PadControl::LeftTrigger] = axis("lefttrigger", 1);
     k.gamepad[PadControl::RightTrigger] = axis("righttrigger", 1);
+    k.gamepad.alt[PadControl::LeftTrigger] = btn("leftshoulder");
+    k.gamepad.alt[PadControl::RightTrigger] = btn("rightshoulder");
     k.gamepad[PadControl::StickUp] = axis("lefty", -1);
     k.gamepad[PadControl::StickDown] = axis("lefty", 1);
     k.gamepad[PadControl::StickLeft] = axis("leftx", -1);

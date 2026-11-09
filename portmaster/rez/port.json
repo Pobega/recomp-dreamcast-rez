@@ -1,0 +1,33 @@
+{
+  "version": 3,
+  "name": "rez.zip",
+  "items": [
+    "Rez.sh",
+    "rez"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "Rez",
+    "desc": "A rail-shooter music video game developed by United Game Artists and released by Sega for the Dreamcast.",
+    "inst": "Copy the Japanese (HDR-0178, SHA-1 9711a0d0c21af3685672b9a42c72abf999fc7150) or European (MK-5119250, SHA-1 01b7c1cc29a840b141a4ae713037eb1224fac233) Rez .chd into ports/rez/gamedata/ or ports/rez/disc/.",
+    "genres": [
+      "action",
+      "arcade"
+    ],
+    "portmaker": "rez-recomp",
+    "source": "https://github.com/tyrannotorus/recomp-dreamcast-rez",
+    "porter": [
+      "rez-recomp"
+    ],
+    "image": {},
+    "rtr": false,
+    "runtime": null,
+    "reqs": [
+      "opengl",
+      "!lowres"
+    ],
+    "arch": [
+      "aarch64"
+    ]
+  }
+}

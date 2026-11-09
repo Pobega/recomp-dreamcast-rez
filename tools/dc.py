@@ -180,8 +180,20 @@ def cmd_setup(a) -> int:
     accepted = [(e["sha1"].lower(), e.get("name", "")) for e in disc_cfg.get("chd", [])]
     if disc_cfg.get("chd_sha1"):
         accepted.append((disc_cfg["chd_sha1"].lower(), ""))
+    bootstrapped_chdr = False
     if accepted:
+        import dcdisc.chd as chd_mod
         from dcdisc.chd import ChdError, data_sha1, read_header
+        if chd_mod.load_libchdr() is None:
+            bdir = os.path.join(info["dir"], "build")
+            if not os.path.exists(os.path.join(bdir, "CMakeCache.txt")):
+                cfg = ["cmake", "-S", info["dir"], "-B", bdir, "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release"]
+                if IS_WIN:
+                    cfg += ["-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl"]
+                run(cfg)
+                bootstrapped_chdr = True
+            run(["cmake", "--build", bdir, "--target", "chdr", "--parallel"])
+            chd_mod._lib_missing = False
         names = "\n".join(f"  {n or '?'}.chd (SHA-1 {s})" for s, n in accepted)
         try:
             header = read_header(disc)
@@ -238,6 +250,8 @@ def cmd_setup(a) -> int:
         write_if_changed(dst, blob)
     if overlays:
         print(f"{len(overlays)} overlay file(s) named in the config extracted to {out}")
+    if bootstrapped_chdr:
+        run(["cmake", os.path.join(info["dir"], "build")])
     info["local"]["disc"] = disc
     save_local(info)
     print(f"disc path remembered in {info['local_path']}")

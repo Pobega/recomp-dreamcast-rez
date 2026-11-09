@@ -1,12 +1,8 @@
-# Deprecated
-Rez Recompiled still works and you may download it, but it has since been replaced with the Deadcast emulator and its integrated Recomp
-Store, available in the NextUI Pak Store, or download here [here](https://github.com/tyrannotorus/emulator-dreamcast-deadcast).
-
 # Rez Recompiled
 Rez (Sega Dreamcast, 2001) is one of my favourite games.
-This is a recomp of Rez for Linux and the TrimUI Brick. It has been statically recompiled to C++.
+This is a recomp of Rez for Linux and PortMaster handhelds. It has been statically recompiled to C++.
 Unlike many recomps, this one does not rely on hardware processor simulation. A large amount of
-time has been spent on performance, especially targeting the TrimUI Brick.
+time has been spent on performance, targeting handhelds and desktop Linux.
 
 <img width="1024" height="768" alt="rez-005" src="https://github.com/user-attachments/assets/53d0e6d9-c97f-4733-afb9-8ba0cb8bdd46" />
 
@@ -25,26 +21,17 @@ time has been spent on performance, especially targeting the TrimUI Brick.
 ## Current Features
 - Plays from the Japanese and European releases (V1.003 .chd).
 - Game has been retooled to run at 60hz with optional widescreen.
-- Linux PC: Vulkan renderer, SDL3 window, sound and controllers.
-- TrimUI Brick: full speed (60 fps) at 640x480. 1024x768 is supported.
+- Linux PC: Unified OpenGL ES 3.0 renderer, SDL2 window, sound and controllers.
+- PortMaster (aarch64): Unified OpenGL ES 3.0 architecture running identically on both Mali-G31 MP2 devices (Anbernic H700 RGSP) and PowerVR GE8300 devices (TrimUI Brick) with no Vulkan dependency.
 
-## Known Issues
-- None known
+## Install on PortMaster
+1. Download or package `rez.zip`.
+2. Extract `rez.zip` into your `ports/` directory on the SD card (creating `ports/Rez.sh` and `ports/rez/`).
+3. Copy your Rez `.chd` (Japanese or European) to `ports/rez/gamedata/` or `ports/rez/disc/`.
+4. Launch Rez from the Ports menu.
+5. Exit hotkey: `Menu + Start` or `Select + Start`.
 
-## Dev Disclaimer
-While I am an industry veteran, note this project has been human-directed but 100% slop-coded. I've
-spent considerable time directing the code, all the while removing AI cruft, needless verbosity, and
-architectural slop, and deleting dead, redundant, pointless code to prevent it from clogging up the
-project, but I still cannot guarantee "thoughtfully-engineered code" at the ground level like I do my
-own work. You are welcome to fork, but beware, here be dragons.
-
-## Install on the TrimUI Brick (NextUI)
-z1. Download `Rez.pak.zip` from [Releases](https://github.com/tyrannotorus/recomp-dreamcast-rez/releases).
-2. Unzip it to `Tools/tg5040/Rez.pak/` on the SD card.
-3. Copy your Rez `.chd` (Japanese or European) to `Tools/tg5040/Rez.pak/disc/`.
-4. Start Tools > Rez. MENU quits.
-
-## Building for Linux and the Brick
+## Building
 See [BUILDING.md](BUILDING.md).
 
 ## Credits
