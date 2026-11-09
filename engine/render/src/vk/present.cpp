@@ -285,4 +285,51 @@ bool Presenter::draw_view(VkCommandBuffer, VkImageView view, std::uint32_t width
     return true;
 }
 
+bool Presenter::draw_rect(VkCommandBuffer, VkExtent2D target, int x, int y, std::uint32_t w,
+                          std::uint32_t h) {
+    if (!tex_ || !program_ || w == 0 || h == 0 || target.width == 0 || target.height == 0)
+        return false;
+
+    glViewport(x, static_cast<GLint>(target.height) - y - static_cast<GLint>(h),
+               static_cast<GLsizei>(w), static_cast<GLsizei>(h));
+
+    const float texel[2] = {
+        1.0f / static_cast<float>(uploaded_width_),
+        1.0f / static_cast<float>(uploaded_height_),
+    };
+
+    glUseProgram(program_);
+    if (u_scale_ >= 0)
+        glUniform2f(u_scale_, 1.0f, 1.0f);
+    if (u_offset_ >= 0)
+        glUniform2f(u_offset_, 0.0f, 0.0f);
+    if (u_texel_ >= 0)
+        glUniform2f(u_texel_, texel[0], texel[1]);
+    if (u_taps_ >= 0)
+        glUniform2f(u_taps_, 1.0f, 1.0f);
+    if (u_mode_ >= 0)
+        glUniform2f(u_mode_, 1.0f, 0.0f);
+    if (u_image_ >= 0)
+        glUniform1i(u_image_, 0);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex_);
+    glBindSampler(0, 0);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_SCISSOR_TEST);
+
+    glBindVertexArray(vao_);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+
+    glDisable(GL_BLEND);
+    glViewport(0, 0, static_cast<GLsizei>(target.width), static_cast<GLsizei>(target.height));
+
+    return true;
+}
+
 }  // namespace dream::render::vk

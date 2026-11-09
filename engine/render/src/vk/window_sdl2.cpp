@@ -444,6 +444,35 @@ bool Window::poll() {
     if (rumble_on_ && (!running_ || game_input_blocked_ || std::chrono::steady_clock::now() >= rumble_until_))
         rumble_off();
 
+    bool has_open_controller = false;
+    for (SDL_Gamepad* g : pads_) {
+        if (g) {
+            has_open_controller = true;
+            break;
+        }
+    }
+
+    bool pad_toggle_fps = false;
+    for (SDL_Gamepad* g : pads_) {
+        if (!g) continue;
+        const bool guide = SDL_GameControllerGetButton(g, SDL_CONTROLLER_BUTTON_GUIDE);
+        const bool back = SDL_GameControllerGetButton(g, SDL_CONTROLLER_BUTTON_BACK);
+        const bool y_btn = SDL_GameControllerGetButton(g, SDL_CONTROLLER_BUTTON_Y);
+        if ((guide || back) && y_btn) {
+            pad_toggle_fps = true;
+            break;
+        }
+    }
+#if defined(__linux__)
+    if (!has_open_controller && input_fd_ >= 0) {
+        const bool ev_mode = (input_buttons_ & (1u << (BTN_MODE - BTN_SOUTH))) != 0;
+        const bool ev_back = (input_buttons_ & (1u << (BTN_SELECT - BTN_SOUTH))) != 0;
+        const bool ev_north = (input_buttons_ & (1u << (BTN_NORTH - BTN_SOUTH))) != 0;
+        if ((ev_mode || ev_back) && ev_north)
+            pad_toggle_fps = true;
+    }
+#endif
+
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
     for (unsigned i = 0; i < static_cast<unsigned>(Control::Count); ++i) {
         const bool was = held_[i];
@@ -455,18 +484,15 @@ bool Window::poll() {
                     now = true;
             }
         }
+        if (i == static_cast<unsigned>(Control::ToggleFps) && pad_toggle_fps)
+            now = true;
+        if (i == static_cast<unsigned>(Control::Menu) && pad_toggle_fps)
+            now = false;
         held_[i] = now;
         pressed_[i] = now && !was;
     }
 
 #if defined(__linux__)
-    bool has_open_controller = false;
-    for (SDL_Gamepad* g : pads_) {
-        if (g) {
-            has_open_controller = true;
-            break;
-        }
-    }
     const bool ev_start_down = (!has_open_controller && input_fd_ >= 0)
                                    ? ((input_buttons_ & (1u << (BTN_START - BTN_SOUTH))) != 0)
                                    : false;

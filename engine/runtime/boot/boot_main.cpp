@@ -141,6 +141,95 @@ struct Live {
     // When the pads were last read: the start of the guest's frame, for display sync's budget.
     std::chrono::steady_clock::time_point pads_read_at{};
 
+    struct IntervalStats {
+        std::atomic<std::uint32_t> render_count{0};
+        std::atomic<std::uint32_t> cpu_count{0};
+        std::atomic<float> cpu_sum_ms{0.0f};
+        std::atomic<float> cpu_max_ms{0.0f};
+        std::atomic<std::uint32_t> wait_count{0};
+        std::atomic<float> wait_sum_ms{0.0f};
+        std::atomic<float> wait_max_ms{0.0f};
+
+        std::atomic<std::uint32_t> decode_count{0};
+        std::atomic<float> decode_sum_ms{0.0f};
+        std::atomic<float> decode_max_ms{0.0f};
+
+        std::atomic<std::uint32_t> draw_count{0};
+        std::atomic<float> draw_sum_ms{0.0f};
+        std::atomic<float> draw_max_ms{0.0f};
+
+        std::atomic<std::uint32_t> swap_count{0};
+        std::atomic<float> swap_sum_ms{0.0f};
+        std::atomic<float> swap_max_ms{0.0f};
+
+        std::atomic<std::size_t> max_strips{0};
+        std::atomic<std::size_t> max_verts{0};
+
+        void record_cpu(float ms) noexcept {
+            cpu_sum_ms.store(cpu_sum_ms.load(std::memory_order_relaxed) + ms, std::memory_order_relaxed);
+            cpu_count.fetch_add(1, std::memory_order_relaxed);
+            float cur = cpu_max_ms.load(std::memory_order_relaxed);
+            while (ms > cur && !cpu_max_ms.compare_exchange_weak(cur, ms, std::memory_order_relaxed));
+        }
+
+        void record_wait(float ms) noexcept {
+            wait_sum_ms.store(wait_sum_ms.load(std::memory_order_relaxed) + ms, std::memory_order_relaxed);
+            wait_count.fetch_add(1, std::memory_order_relaxed);
+            float cur = wait_max_ms.load(std::memory_order_relaxed);
+            while (ms > cur && !wait_max_ms.compare_exchange_weak(cur, ms, std::memory_order_relaxed));
+        }
+
+        void record_decode(float ms) noexcept {
+            decode_sum_ms.store(decode_sum_ms.load(std::memory_order_relaxed) + ms, std::memory_order_relaxed);
+            decode_count.fetch_add(1, std::memory_order_relaxed);
+            float cur = decode_max_ms.load(std::memory_order_relaxed);
+            while (ms > cur && !decode_max_ms.compare_exchange_weak(cur, ms, std::memory_order_relaxed));
+        }
+
+        void record_draw(float ms) noexcept {
+            draw_sum_ms.store(draw_sum_ms.load(std::memory_order_relaxed) + ms, std::memory_order_relaxed);
+            draw_count.fetch_add(1, std::memory_order_relaxed);
+            float cur = draw_max_ms.load(std::memory_order_relaxed);
+            while (ms > cur && !draw_max_ms.compare_exchange_weak(cur, ms, std::memory_order_relaxed));
+        }
+
+        void record_swap(float ms) noexcept {
+            swap_sum_ms.store(swap_sum_ms.load(std::memory_order_relaxed) + ms, std::memory_order_relaxed);
+            swap_count.fetch_add(1, std::memory_order_relaxed);
+            float cur = swap_max_ms.load(std::memory_order_relaxed);
+            while (ms > cur && !swap_max_ms.compare_exchange_weak(cur, ms, std::memory_order_relaxed));
+        }
+
+        void record_complexity(std::size_t strips, std::size_t verts) noexcept {
+            std::size_t s = max_strips.load(std::memory_order_relaxed);
+            while (strips > s && !max_strips.compare_exchange_weak(s, strips, std::memory_order_relaxed));
+            std::size_t v = max_verts.load(std::memory_order_relaxed);
+            while (verts > v && !max_verts.compare_exchange_weak(v, verts, std::memory_order_relaxed));
+        }
+
+        void reset() noexcept {
+            render_count.store(0, std::memory_order_relaxed);
+            cpu_count.store(0, std::memory_order_relaxed);
+            cpu_sum_ms.store(0.0f, std::memory_order_relaxed);
+            cpu_max_ms.store(0.0f, std::memory_order_relaxed);
+            wait_count.store(0, std::memory_order_relaxed);
+            wait_sum_ms.store(0.0f, std::memory_order_relaxed);
+            wait_max_ms.store(0.0f, std::memory_order_relaxed);
+            decode_count.store(0, std::memory_order_relaxed);
+            decode_sum_ms.store(0.0f, std::memory_order_relaxed);
+            decode_max_ms.store(0.0f, std::memory_order_relaxed);
+            draw_count.store(0, std::memory_order_relaxed);
+            draw_sum_ms.store(0.0f, std::memory_order_relaxed);
+            draw_max_ms.store(0.0f, std::memory_order_relaxed);
+            swap_count.store(0, std::memory_order_relaxed);
+            swap_sum_ms.store(0.0f, std::memory_order_relaxed);
+            swap_max_ms.store(0.0f, std::memory_order_relaxed);
+            max_strips.store(0, std::memory_order_relaxed);
+            max_verts.store(0, std::memory_order_relaxed);
+        }
+    };
+    IntervalStats stats_;
+
     // `scale` multiplies the resolution the geometry is drawn at. The frame is resampled back to
     // the guest's own framebuffer on the way into video memory, so a higher setting sharpens the
     // geometry without lying to the guest about the size of its screen.
@@ -203,6 +292,7 @@ struct Live {
         // The presenter's sets name the old views by handle; the new ones may reuse the values.
         presenter.forget_views();
         overlay_presenter.forget_views();
+        fps_presenter.forget_views();
         const bool readback = offscreen.readback;
         offscreen.destroy();
         offscreen.readback = readback;
@@ -281,6 +371,11 @@ struct Live {
             error = overlay_presenter.error();
             return false;
         }
+        fps_presenter.overlay_layer = true;  // the zero-readback GPU HUD layer
+        if (!fps_presenter.create(window.context(), window.render_pass())) {
+            error = fps_presenter.error();
+            return false;
+        }
         // Pipelines from earlier runs, created now rather than mid-game. Beside the bindings, or
         // in --cache-dir (a NextUI window has no bindings file).
         {
@@ -330,6 +425,10 @@ struct Live {
     void render(const dream::pvr::RenderWords& words) {
         // Kept (shared, not copied) to draw again while an extension pauses the guest.
         last_stream = words;
+        const std::uint32_t* regs = pvr_.render_regs();
+        const bool is_rtt = rtt_on && (regs[0x060 / 4] & 0x01000000u) != 0;
+        if (!is_rtt)
+            stats_.render_count.fetch_add(1, std::memory_order_relaxed);
         // The render thread decodes it too, when every extension allows it this frame.
         if (threaded_ && frames_offthread()) {
             hand_over(&words);
@@ -369,6 +468,11 @@ struct Live {
     // yields the video memory the guest wrote before it.
     template <typename TakeDirty>
     void draw(const dream::render::Frame& frame, const std::uint32_t* regs, TakeDirty&& take_dirty) {
+        const auto draw_start = std::chrono::steady_clock::now();
+        std::size_t strip_count = 0;
+        for (const auto& l : frame.lists)
+            strip_count += l.size();
+        stats_.record_complexity(strip_count, frame.vertices.size());
         // PT_ALPHA_REF: the punch-through threshold the guest chose, which changes per scene.
         geometry.alpha_ref = static_cast<float>(regs[0x11C / 4] & 0xFFu) / 255.0f;
         geometry.shadow_scale = static_cast<float>(regs[0x074 / 4] & 0xFFu) / 256.0f;
@@ -407,7 +511,10 @@ struct Live {
         // On the render thread, the guest's thread did this bookkeeping at the hand-over.
         if (!threaded_)
             await_render = false;
-        if (!offscreen.render(renderer, frame, geometry)) {
+        const bool ok = offscreen.render(renderer, frame, geometry);
+        const float draw_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - draw_start).count();
+        stats_.record_draw(draw_ms);
+        if (!ok) {
             if (!reported_error) {
                 reported_error = true;
                 std::fprintf(stderr, "render: %s\n", offscreen.error().c_str());
@@ -508,7 +615,10 @@ struct Live {
         std::unique_lock<std::mutex> lock(jobs_mutex_);
         if (job.present) {
             // One present at most behind the guest: the picture stays within a frame of the game.
+            const auto wait_start = std::chrono::steady_clock::now();
             idle_cv_.wait(lock, [this] { return presents_queued_ == 0; });
+            const float wait_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - wait_start).count();
+            stats_.record_wait(wait_ms);
             ++presents_queued_;
         }
         if (decoding_) {
@@ -523,8 +633,11 @@ struct Live {
     // A render job's parameter stream into its own frame, with the background plane and the far
     // clipping (the decode thread's work, or the render thread's without it).
     void decode_into(RenderJob& job) {
+        const auto t0 = std::chrono::steady_clock::now();
         parse_into(job, false);
         finish_decode(job);
+        const float ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        stats_.record_decode(ms);
     }
 
     // A render job's parameter stream parsed into its own frame: the part of its decode that reads
@@ -616,7 +729,10 @@ struct Live {
                 lock.unlock();
                 if (!job.present && job.decode) {
                     decode_mode(job.fmode);
+                    const auto t0 = std::chrono::steady_clock::now();
                     parse_into(job, true);
+                    const float ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                    stats_.record_decode(ms);
                 }
                 parsed.push_back(std::move(job));
                 lock.lock();
@@ -627,7 +743,10 @@ struct Live {
             lock.unlock();
             if (!job.present && job.decode) {
                 decode_mode(job.fmode);
+                const auto t0 = std::chrono::steady_clock::now();
                 finish_decode(job);
+                const float ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                stats_.record_decode(ms);
             }
             lock.lock();
             jobs_.push_back(std::move(job));
@@ -663,8 +782,11 @@ private:
                     b.rescued.insert(b.rescued.end(), p.borrowed, p.borrowed + p.count);
             b.state.store(Borrow::kRescued, std::memory_order_release);
         } else if (taken == Borrow::kDecoding) {
+            const auto wait_start = std::chrono::steady_clock::now();
             std::unique_lock<std::mutex> lock(jobs_mutex_);
             decoded_cv_.wait(lock, [&b] { return b.state.load(std::memory_order_acquire) == Borrow::kDone; });
+            const float wait_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - wait_start).count();
+            stats_.record_wait(wait_ms);
         }
     }
 
@@ -754,6 +876,7 @@ public:
 
     // The fast path's present: the rendered frame sampled where it is, on the GPU.
     void present_job(const RenderJob& job) {
+        const auto swap_start = std::chrono::steady_clock::now();
         std::uint32_t image = 0;
         VkCommandBuffer cmd = nullptr;
         if (!window.begin_frame(image, cmd)) {
@@ -763,8 +886,11 @@ public:
         begin_window_pass(cmd, image);
         presenter.draw_view(cmd, offscreen.sampled_view(), offscreen.width(), offscreen.height(),
                             window.extent());
+        draw_fps_hud(cmd);
         if (!window.end_frame(image))
             window.recreate_swapchain();
+        const float swap_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - swap_start).count();
+        stats_.record_swap(swap_ms);
         last_present = std::chrono::steady_clock::now();
         ++presented;
         if (screenshot_at.count(presented))
@@ -884,27 +1010,28 @@ public:
         const bool overlay_up = overlay_open();
         // An open overlay owns the keyboard and pads; the game keeps running with them released.
         window.set_game_input_blocked(overlay_up);
+        using dream::render::vk::Control;
+        if (window.pressed(Control::ToggleFps)) {
+            show_fps = !show_fps;
+            fps_mark = {};
+        }
+
         // The render thread's fast path: a frame the renderer drew, shown as it is. Anything else
         // waits for the queue to empty and runs here.
         if (threaded_) {
-            using dream::render::vk::Control;
-            if (from_renderer && !show_fps && !menu.is_open() && !overlay_up &&
+            if (from_renderer && !menu.is_open() && !overlay_up &&
                 !window.pressed(Control::Screenshot)) {
                 RenderJob job = take_job();
                 job.present = true;
                 job.shown = shown;
                 job.guest_frame = frame;
                 push(std::move(job));
-                if (window.pressed(Control::ToggleFps)) {
-                    show_fps = !show_fps;
-                    fps_mark = {};
-                }
                 return true;
             }
             drain();
         }
         ScopedGlContext gl_ctx(window);
-        if (interpolate && interp_ready && from_renderer && !offscreen.readback && !show_fps &&
+        if (interpolate && interp_ready && from_renderer && !offscreen.readback &&
             !menu.is_open() && !overlay_up) {
             interp_ready = false;
             std::uint32_t iimage = 0;
@@ -913,6 +1040,7 @@ public:
                 begin_window_pass(icmd, iimage);
                 presenter.draw_view(icmd, interp_off.sampled_view(), interp_off.width(),
                                     interp_off.height(), window.extent());
+                draw_fps_hud(icmd);
                 if (!window.end_frame(iimage))
                     window.recreate_swapchain();
                 // Half a guest frame (59.94 Hz) before the real one.
@@ -950,7 +1078,7 @@ public:
         }
         const bool cpu_overlay = overlay_up && !overlay_px;
         const bool direct =
-            from_renderer && !offscreen.readback && !show_fps && !menu.is_open() && !cpu_overlay;
+            from_renderer && !offscreen.readback && !menu.is_open() && !cpu_overlay;
         const std::uint32_t* source =
             direct ? nullptr : (from_renderer ? offscreen.pixels() : pixels.data());
         // Composited into the frame as it is handed to the GPU, so it costs no extra copy of the
@@ -965,8 +1093,6 @@ public:
             overlay_frame.assign(source, source + static_cast<std::size_t>(shown.width) *
                                                       shown.height);
             std::uint32_t* px = overlay_frame.data();
-            if (show_fps)
-                draw_counter(px, shown.width, shown.height);
             for (auto* e : overlays)
                 if (e->overlay_open())
                     e->draw_overlay(px, shown.width, shown.height, window.extent().width,
@@ -974,17 +1100,14 @@ public:
             if (menu.is_open())
                 menu.draw(px, shown.width, shown.width, shown.height, window.devices());
             presenter.upload(cmd, px, shown.width, shown.height);
-        } else if (show_fps || menu.is_open())
+        } else if (menu.is_open()) {
             presenter.upload(cmd, source, shown.width, shown.height,
                              [this](std::uint32_t* px, std::uint32_t w, std::uint32_t h) {
-                                 if (show_fps)
-                                     draw_counter(px, w, h);
-                                 // Last, so the screen sits over the counter rather than under it.
-                                 if (menu.is_open())
-                                     menu.draw(px, w, w, h, window.devices());
+                                 menu.draw(px, w, w, h, window.devices());
                              });
-        else
+        } else {
             presenter.upload(cmd, source, shown.width, shown.height);
+        }
         // The overlay image goes up only when the menu redrew or the window changed size.
         if (overlay_px && overlay_dirty) {
             overlay_presenter.upload(cmd, overlay_px, overlay_w, overlay_h);
@@ -998,14 +1121,11 @@ public:
             presenter.draw(cmd, window.extent());
         if (overlay_px)
             overlay_presenter.draw(cmd, window.extent());
+        draw_fps_hud(cmd);
         if (!window.end_frame(image))
             window.recreate_swapchain();
         last_present = std::chrono::steady_clock::now();
         ++presented;
-        if (window.pressed(dream::render::vk::Control::ToggleFps)) {
-            show_fps = !show_fps;
-            fps_mark = {};  // start the next average fresh rather than from whenever it last ran
-        }
         if (window.pressed(dream::render::vk::Control::Screenshot))
             screenshot();
         if (screenshot_at.count(presented))
@@ -1186,31 +1306,110 @@ public:
         const double guest_s = static_cast<double>(guest_cycles) / 200e6;
         if (fps_mark == std::chrono::steady_clock::time_point{}) {
             fps_mark = now;
+            prof_log_mark = now;
             fps_frames_at_mark = presented;
             fps_guest_at_mark = guest_s;
+            stats_.reset();
             return;
         }
         const double elapsed = std::chrono::duration<double>(now - fps_mark).count();
         if (elapsed < 0.5)
             return;
+
         fps_shown = static_cast<double>(presented - fps_frames_at_mark) / elapsed;
         speed_shown = (guest_s - fps_guest_at_mark) / elapsed;
+        renders_shown = static_cast<double>(stats_.render_count.load(std::memory_order_relaxed)) / elapsed;
+
+        const std::uint32_t step_counter = memory_.read32(0x8C28E088u);
+        const std::uint32_t steps_curr = memory_.read32(0x8C28E07Cu);
+        const std::uint32_t steps_target = memory_.read32(0x8C28E080u);
+        if (have_last_step)
+            logic_shown = static_cast<double>(step_counter - last_step_counter) / elapsed;
+        last_step_counter = step_counter;
+        have_last_step = true;
+
+        const std::uint32_t cpu_cnt = stats_.cpu_count.load(std::memory_order_relaxed);
+        const float cpu_avg_ms = cpu_cnt ? (stats_.cpu_sum_ms.load(std::memory_order_relaxed) / static_cast<float>(cpu_cnt)) : 0.0f;
+        const float cpu_max_ms = stats_.cpu_max_ms.load(std::memory_order_relaxed);
+
+        const std::uint32_t wait_cnt = stats_.wait_count.load(std::memory_order_relaxed);
+        const float wait_avg_ms = wait_cnt ? (stats_.wait_sum_ms.load(std::memory_order_relaxed) / static_cast<float>(wait_cnt)) : 0.0f;
+        const float wait_max_ms = stats_.wait_max_ms.load(std::memory_order_relaxed);
+
+        const std::uint32_t dec_cnt = stats_.decode_count.load(std::memory_order_relaxed);
+        const float dec_avg_ms = dec_cnt ? (stats_.decode_sum_ms.load(std::memory_order_relaxed) / static_cast<float>(dec_cnt)) : 0.0f;
+        const float dec_max_ms = stats_.decode_max_ms.load(std::memory_order_relaxed);
+
+        const std::uint32_t draw_cnt = stats_.draw_count.load(std::memory_order_relaxed);
+        const float draw_avg_ms = draw_cnt ? (stats_.draw_sum_ms.load(std::memory_order_relaxed) / static_cast<float>(draw_cnt)) : 0.0f;
+        const float draw_max_ms = stats_.draw_max_ms.load(std::memory_order_relaxed);
+
+        const std::uint32_t swap_cnt = stats_.swap_count.load(std::memory_order_relaxed);
+        const float swap_avg_ms = swap_cnt ? (stats_.swap_sum_ms.load(std::memory_order_relaxed) / static_cast<float>(swap_cnt)) : 0.0f;
+        const float swap_max_ms = stats_.swap_max_ms.load(std::memory_order_relaxed);
+
+        const float gpu_avg_ms = dec_avg_ms + draw_avg_ms + swap_avg_ms;
+        const float gpu_max_ms = dec_max_ms + draw_max_ms + swap_max_ms;
+
+        const std::size_t max_strips = stats_.max_strips.load(std::memory_order_relaxed);
+        const std::size_t max_verts = stats_.max_verts.load(std::memory_order_relaxed);
+
+        {
+            std::lock_guard<std::mutex> lock(fps_mutex_);
+            if (fps_pixels.size() != kFpsHudWidth * kFpsHudHeight)
+                fps_pixels.resize(kFpsHudWidth * kFpsHudHeight);
+            std::fill(fps_pixels.begin(), fps_pixels.end(), 0xB0000000u);
+            char line1[64];
+            std::snprintf(line1, sizeof line1, "%4.1f FPS 3D:%2.0f LOG:%2.0f %4.2fX",
+                          fps_shown, renders_shown, logic_shown, speed_shown);
+            char line2[64];
+            std::snprintf(line2, sizeof line2, "CPU:%4.1f/%4.1fms GPU:%4.1f/%4.1fms W:%3.1fms",
+                          cpu_avg_ms, cpu_max_ms, gpu_avg_ms, gpu_max_ms, wait_max_ms);
+            dream::render::TextStyle style;
+            style.scale = 1;
+            style.fg = 0xFFFFFFFFu;
+            dream::render::draw_text(fps_pixels.data(), kFpsHudWidth, kFpsHudWidth, kFpsHudHeight,
+                                     4, 2, line1, style);
+            dream::render::draw_text(fps_pixels.data(), kFpsHudWidth, kFpsHudWidth, kFpsHudHeight,
+                                     4, 12, line2, style);
+            fps_dirty.store(true, std::memory_order_release);
+        }
+
+        const double prof_elapsed = std::chrono::duration<double>(now - prof_log_mark).count();
+        if (prof_elapsed >= 1.0) {
+            if (enable_profile || show_fps) {
+                std::printf("[prof] vbl=%.1f (%.2fx) 3d=%.1f logic=%.1f (steps=%u/%u) | "
+                            "cpu=%.1f/%.1fms wait=%.1f/%.1fms dec=%.1fms draw=%.1f/%.1fms swap=%.1f/%.1fms | "
+                            "max_strips=%zu max_verts=%zu\n",
+                            fps_shown, speed_shown, renders_shown, logic_shown, steps_curr, steps_target,
+                            cpu_avg_ms, cpu_max_ms, wait_avg_ms, wait_max_ms, dec_avg_ms, draw_avg_ms,
+                            draw_max_ms, swap_avg_ms, swap_max_ms, max_strips, max_verts);
+                std::fflush(stdout);
+            }
+            prof_log_mark = now;
+        }
+
+        stats_.reset();
         fps_mark = now;
         fps_frames_at_mark = presented;
         fps_guest_at_mark = guest_s;
     }
 
-    // Drawn into the frame the presenter is about to upload, so its size follows --scale and it
-    // stays the same size relative to the picture however the window is resized.
-    void draw_counter(std::uint32_t* px, std::uint32_t w, std::uint32_t h) {
-        char line[64];
-        std::snprintf(line, sizeof line, "%.1f FPS  %.2fX", fps_shown, speed_shown);
-        dream::render::TextStyle style;
-        // One text pixel per two guest pixels at --scale 1, and the same apparent size at every
-        // scale above it, so the counter neither disappears nor swamps the picture.
-        style.scale = std::max(2u, 2u * (w / kGuestWidth));
-        const int margin = static_cast<int>(4 * style.scale);
-        dream::render::draw_text(px, w, w, h, margin, margin, line, style);
+    void draw_fps_hud(VkCommandBuffer cmd) {
+        if (!show_fps)
+            return;
+        if (fps_dirty.load(std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> lock(fps_mutex_);
+            if (!fps_pixels.empty()) {
+                fps_presenter.upload(cmd, fps_pixels.data(), kFpsHudWidth, kFpsHudHeight);
+                fps_dirty.store(false, std::memory_order_release);
+            }
+        }
+        const auto ext = window.extent();
+        const std::uint32_t hud_scale = (ext.width >= 720) ? 2u : 1u;
+        const std::uint32_t hud_w = kFpsHudWidth * hud_scale;
+        const std::uint32_t hud_h = kFpsHudHeight * hud_scale;
+        fps_presenter.draw_rect(cmd, ext, 8, 8, hud_w, hud_h);
     }
 
     void screenshot() { screenshot(shown, from_renderer, guest_frame); }
@@ -1283,6 +1482,7 @@ public:
     std::chrono::steady_clock::time_point last_present{};
     dream::render::vk::Presenter presenter;
     dream::render::vk::Presenter overlay_presenter;  // the in-game menu layer
+    dream::render::vk::Presenter fps_presenter;      // the zero-readback GPU HUD layer
     std::uint32_t overlay_w = 0, overlay_h = 0;
     bool overlay_dirty = true;
     dream::render::DisplayList decoder;
@@ -1294,10 +1494,23 @@ public:
     std::uint64_t guest_frame = 0;
     dream::pvr::RenderWords last_stream;
     unsigned screenshots = 0;
+
+    static constexpr std::uint32_t kFpsHudWidth = 360;
+    static constexpr std::uint32_t kFpsHudHeight = 24;
+    std::vector<std::uint32_t> fps_pixels;
+    std::atomic<bool> fps_dirty{false};
+    std::mutex fps_mutex_;
+
     // The on-screen counter. Two numbers, because they answer different questions: how smooth it
     // looks (frames actually presented per second of wall clock) and whether it is keeping up
     // (guest time elapsed per second of wall clock, where 1.00x is the console's own pace).
     bool show_fps = false;
+    bool enable_profile = false;
+    double renders_shown = 0.0;
+    double logic_shown = 0.0;
+    std::uint32_t last_step_counter = 0;
+    bool have_last_step = false;
+    std::chrono::steady_clock::time_point prof_log_mark{};
     bool input_polled = false, window_open = true;  // poll_input()
     DisplaySync sync;                                // --sync-display
     // The binding screen (F1, or a pad's select button). The guest is stopped while it is up, so
@@ -1410,6 +1623,7 @@ void usage(const char* argv0, std::FILE* out) {
         "  --sync-display         pace at the display's rate when it is within 0.5%% of the\n"
         "                         game's (60 Hz for a 59.94 Hz game: +0.1%% speed, no repeats)\n"
         "  --fps                  start with the on-screen frame-rate counter showing\n"
+        "  --profile              log 1-second performance telemetry to stdout\n"
         "  --present-path P       vulkan (default) or dxgi (Windows: flip model, lower latency)\n"
         "  --present-mode M       vsync (default), mailbox or immediate\n"
         "  --cache-dir DIR        keep the pipeline cache there (default: beside the bindings)\n"
@@ -1528,6 +1742,9 @@ int main(int argc, char** argv) {
     bool no_live_input = false;
     // --fps: start with the on-screen counter showing. F10 toggles it either way.
     bool start_with_fps = false;
+    bool enable_profile = false;
+    if (const char* env_p = std::getenv("DREAM_PROFILE"); env_p && *env_p && std::strcmp(env_p, "0") != 0)
+        enable_profile = true;
     std::set<std::uint64_t> screenshot_at;  // --screenshot-at N[,N...]
     std::string screenshot_dir;             // --screenshot-dir DIR
     unsigned scale = 1;
@@ -1609,6 +1826,8 @@ int main(int argc, char** argv) {
             no_live_input = true;
         else if (!std::strcmp(argv[i], "--fps"))
             start_with_fps = true;
+        else if (!std::strcmp(argv[i], "--profile"))
+            enable_profile = true;
         else if (!std::strcmp(argv[i], "--screenshot-dir") && i + 1 < argc)
             screenshot_dir = argv[++i];
         else if (!std::strcmp(argv[i], "--screenshot-at") && i + 1 < argc)
@@ -1969,6 +2188,7 @@ int main(int argc, char** argv) {
         // A frame is copied to the host only when something reads it (a screenshot).
         live->offscreen.readback = false;
         live->show_fps = start_with_fps;
+        live->enable_profile = enable_profile;
         live->window.set_present_mode(present_mode);
         live->window.set_present_path(present_path);
         live->screenshot_at = screenshot_at;
@@ -2088,9 +2308,12 @@ int main(int argc, char** argv) {
                 previous_vblank();
             const auto vblank_at = std::chrono::steady_clock::now();
             auto& sync = live->sync;
-            if (live->pads_read_at.time_since_epoch().count() != 0)
-                sync.note_emulation(
-                    std::chrono::duration<float, std::milli>(vblank_at - live->pads_read_at).count());
+            if (live->pads_read_at.time_since_epoch().count() != 0) {
+                const float cpu_ms =
+                    std::chrono::duration<float, std::milli>(vblank_at - live->pads_read_at).count();
+                sync.note_emulation(cpu_ms);
+                live->stats_.record_cpu(cpu_ms);
+            }
             const double frame_s = sync.note_guest_frame(sys.ctx.cycles);
             // Early: hold the frame until its moment, so presents keep one per refresh at a fixed
             // point before the vblank (a frame presented early would otherwise replace the one

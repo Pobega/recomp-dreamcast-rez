@@ -39,6 +39,8 @@ public:
                 const std::function<void(std::uint32_t* pixels, std::uint32_t width,
                                          std::uint32_t height)>& decorate = {});
     bool draw(VkCommandBuffer cmd, VkExtent2D target);
+    bool draw_rect(VkCommandBuffer cmd, VkExtent2D target, int x, int y, std::uint32_t w,
+                   std::uint32_t h);
     void forget_views() {}
     bool draw_view(VkCommandBuffer cmd, VkImageView view, std::uint32_t width,
                    std::uint32_t height, VkExtent2D target);
