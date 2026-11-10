@@ -191,9 +191,9 @@ float current_panel_aspect() {
 
 // The shape in effect now: 4:3, or with Expanded the window's (clamped to what the port has been
 // verified with); kept by Core::follow_window(), read by the widescreen hook and the HUD fix.
-float g_aspect_now = 4.0f / 3.0f;
+std::atomic<float> g_aspect_now{4.0f / 3.0f};
 
-float target_aspect() { return g_aspect_now; }
+float target_aspect() { return g_aspect_now.load(std::memory_order_relaxed); }
 
 // `--aspect W:H` wider than 4:3 on the command line: that fixed shape for this run, whatever the
 // window's (headless shots and tests at 21:9 without a 21:9 screen). 0: follow the window. Not a
@@ -323,7 +323,8 @@ public:
         add_texture_flags(args, g_settings.file().parent_path());
         add_input_and_mod_flags(args, g_settings.file().parent_path());
         // Expanded starts at 16:9 (the window opens at that shape) and then follows the window.
-        g_aspect_now = expanded_aspect() ? expanded_target(0.0f) : 4.0f / 3.0f;
+        g_aspect_now.store(expanded_aspect() ? expanded_target(0.0f) : 4.0f / 3.0f,
+                           std::memory_order_relaxed);
         const float aspect = target_aspect();
         if (aspect > 4.0f / 3.0f + 0.01f && g_port->widescreen_anamorphic &&
             !has_flag(args, "--render-aspect")) {
@@ -476,20 +477,20 @@ public:
         // Settings changed by flags this run are not saved unless asked: a test run must not
         // leave its choices behind in the player's file.
         launch_dirty_ = g_settings.dirty();
-        hud_edges_ = g_settings.get("hud_layout", "edges") != "center";
+        hud_edges_.store(g_settings.get("hud_layout", "edges") != "center", std::memory_order_relaxed);
         // `sharp_2d` (default true): 1:1 2D quads point sampled, as the console showed them at 1x
         // (include/dreamcomp/sharp2d.h).
         sharp_2d_ = g_settings.get_bool("sharp_2d", true);
         apply_presentation();
         if (expanded_aspect()) {
             const float pa = current_panel_aspect();
-            g_aspect_now = expanded_target(pa > 0.0f ? pa : 0.0f);
+            g_aspect_now.store(expanded_target(pa > 0.0f ? pa : 0.0f), std::memory_order_relaxed);
         } else {
-            g_aspect_now = 4.0f / 3.0f;
+            g_aspect_now.store(4.0f / 3.0f, std::memory_order_relaxed);
         }
         auto& hc = dream::host::host_controls();
         if (g_port && g_port->widescreen_anamorphic && hc.set_render_aspect)
-            hc.set_render_aspect(g_aspect_now);
+            hc.set_render_aspect(g_aspect_now.load(std::memory_order_relaxed));
         if (g_port && g_port->on_start)
             g_port->on_start(sys, g_settings);
         std::printf("rez: %s, settings %s%s\n", g_port && g_port->title ? g_port->title : "?",
@@ -510,7 +511,7 @@ public:
         const float want = expanded_aspect()
                                ? expanded_target(win_a)
                                : 4.0f / 3.0f;
-        if (std::fabs(want - g_aspect_now) < 0.005f) {
+        if (std::fabs(want - g_aspect_now.load(std::memory_order_relaxed)) < 0.005f) {
             settle_ = 0;
             return;
         }
@@ -522,7 +523,7 @@ public:
         if (++settle_ < 15)
             return;
         settle_ = 0;
-        g_aspect_now = want;
+        g_aspect_now.store(want, std::memory_order_relaxed);
         if (g_port->widescreen_anamorphic && hc.set_render_aspect)
             hc.set_render_aspect(want);
     }
@@ -552,7 +553,8 @@ public:
             return;
         hud::Snapshot snap;
         hud::Stats stats;
-        hud::correct(frame, g_port->hud, apply ? target_aspect() : 4.0f / 3.0f, hud_edges_, apply,
+        hud::correct(frame, g_port->hud, apply ? target_aspect() : 4.0f / 3.0f,
+                     hud_edges_.load(std::memory_order_relaxed), apply,
                      hud_overrides_, watching ? &snap : nullptr, stats);
         if (!watching)
             return;
@@ -568,17 +570,19 @@ public:
         hud_snapshot_ready_ = true;
     }
 
-    // The render thread may do this frame's work (host_ext.h) while it is only the 2D sharpening, a
-    // function of the frame alone: the HUD correction and its editor read settings and overrides
-    // the menus change on the guest's thread.
+    // The render thread may do this frame's work (host_ext.h) whenever the HUD editor is not watching.
     bool frame_offthread_ok() override {
-        if (!g_port || !g_port->hud.enabled)
-            return true;
-        return !hud_watch_.load(std::memory_order_relaxed) && !widescreen();
+        return !hud_watch_.load(std::memory_order_relaxed);
     }
     void on_frame_offthread(dream::render::Frame& frame) override {
         if (sharp_2d_)
             sharpen_2d(frame);
+        if (g_port && g_port->hud.enabled && widescreen()) {
+            hud::Stats stats;
+            hud::correct(frame, g_port->hud, target_aspect(),
+                         hud_edges_.load(std::memory_order_relaxed), true,
+                         hud_overrides_, nullptr, stats);
+        }
     }
 
     // --- HUD overrides (game thread) ---
@@ -714,7 +718,7 @@ public:
     // After Apply in the in-game menu: what can change without a restart does so now (fit, HUD,
     // rumble, fullscreen). Everything else is marked "Next start" in the menu.
     void apply_live() {
-        hud_edges_ = g_settings.get("hud_layout", "edges") != "center";
+        hud_edges_.store(g_settings.get("hud_layout", "edges") != "center", std::memory_order_relaxed);
         // `sharp_2d` (default true): 1:1 2D quads point sampled, as the console showed them at 1x
         // (include/dreamcomp/sharp2d.h).
         sharp_2d_ = g_settings.get_bool("sharp_2d", true);
@@ -736,7 +740,9 @@ public:
             hc.set_fullscreen(g_settings.get_bool("fullscreen", false));
         launch_dirty_ = false;  // the file now holds what is in effect
         std::printf("rez: applied in game: aspect %s, hud %s, rumble %d%%, fullscreen %s\n",
-                    expanded_aspect() ? "expanded" : "original", hud_edges_ ? "edges" : "center", g_settings.get_int("rumble", 100),
+                    expanded_aspect() ? "expanded" : "original",
+                    hud_edges_.load(std::memory_order_relaxed) ? "edges" : "center",
+                    g_settings.get_int("rumble", 100),
                     g_settings.get_bool("fullscreen", false) ? "on" : "off");
     }
 
@@ -765,7 +771,7 @@ private:
     bool save_on_exit_ = false;
     std::filesystem::path config_path_, exe_dir_;
     std::uint64_t vblanks_ = 0;
-    bool hud_edges_ = true;
+    std::atomic<bool> hud_edges_{true};
     float settle_aspect_ = 0.0f;
     unsigned settle_ = 0;
     // Atomic: on_frame_offthread() reads it on the launcher's render thread.
@@ -811,7 +817,7 @@ void set_render_scale(int scale) {
         const float want = (expanded_aspect() && w > 0 && h > 0)
                                ? expanded_target(static_cast<float>(w) / static_cast<float>(h))
                                : 4.0f / 3.0f;
-        g_aspect_now = want;
+        g_aspect_now.store(want, std::memory_order_relaxed);
         if (g_port->widescreen_anamorphic && hc.set_render_aspect)
             hc.set_render_aspect(want);
     }
