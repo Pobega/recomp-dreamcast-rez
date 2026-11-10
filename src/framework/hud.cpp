@@ -194,7 +194,10 @@ void add_tcw(std::vector<std::uint32_t>& v, std::uint32_t t) {
 
 void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float aspect, bool edges,
              bool apply, const Overrides& overrides, Snapshot* snapshot, Stats& stats) {
-    const float k = apply ? (4.0f / 3.0f) / aspect : 1.0f;  // < 1: squeeze back
+    constexpr float kOriginalAspect = 4.0f / 3.0f;
+    constexpr float kScreenCenterY = 240.0f;
+    const float kx = (apply && aspect > kOriginalAspect) ? (kOriginalAspect / aspect) : 1.0f;
+    const float ky = (apply && aspect > 0.0f && aspect < kOriginalAspect) ? (aspect / kOriginalAspect) : 1.0f;
     auto type_of = [](const dream::render::Polygon& p) { return p.pcw >> 29; };  // 5 sprite, 4 polygon
     // A primitive drawn at one depth (every vertex the same 1/w): 2D.
     auto flat = [&](const dream::render::Polygon& p, float& z) {
@@ -392,14 +395,17 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
                     const auto& lb = frame.lines[p.first];
                     for (std::uint32_t e = 0; e < lb.count; ++e) {
                         auto& le = frame.line_edges[lb.first + e];
-                        le.xa = anchor + (le.xa - anchor) * k;
-                        le.xb = anchor + (le.xb - anchor) * k;
+                        le.xa = anchor + (le.xa - anchor) * kx;
+                        le.xb = anchor + (le.xb - anchor) * kx;
+                        le.ya = kScreenCenterY + (le.ya - kScreenCenterY) * ky;
+                        le.yb = kScreenCenterY + (le.yb - kScreenCenterY) * ky;
                     }
                 }
             } else {
                 for (std::uint32_t v = 0; v < p.count; ++v) {
                     auto& vx = frame.vertices[p.first + v];
-                    vx.x = anchor + (vx.x - anchor) * k;
+                    vx.x = anchor + (vx.x - anchor) * kx;
+                    vx.y = kScreenCenterY + (vx.y - kScreenCenterY) * ky;
                 }
             }
             ++stats.corrected;
@@ -413,10 +419,10 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
             b.ox1 = gx1[r];
             b.oy0 = gy0[r];
             b.oy1 = gy1[r];
-            b.x0 = anchor + (gx0[r] - anchor) * k;
-            b.x1 = anchor + (gx1[r] - anchor) * k;
-            b.y0 = gy0[r];
-            b.y1 = gy1[r];
+            b.x0 = anchor + (gx0[r] - anchor) * kx;
+            b.x1 = anchor + (gx1[r] - anchor) * kx;
+            b.y0 = kScreenCenterY + (gy0[r] - kScreenCenterY) * ky;
+            b.y1 = kScreenCenterY + (gy1[r] - kScreenCenterY) * ky;
             b.anchor = resolved(anchor);
             b.hud = true;
             b.override_index = goverride[r];
@@ -429,10 +435,10 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
         pc.ox1 = items[i].x1;
         pc.oy0 = items[i].y0;
         pc.oy1 = items[i].y1;
-        pc.x0 = anchor + (items[i].x0 - anchor) * k;
-        pc.x1 = anchor + (items[i].x1 - anchor) * k;
-        pc.y0 = items[i].y0;
-        pc.y1 = items[i].y1;
+        pc.x0 = anchor + (items[i].x0 - anchor) * kx;
+        pc.x1 = anchor + (items[i].x1 - anchor) * kx;
+        pc.y0 = kScreenCenterY + (items[i].y0 - kScreenCenterY) * ky;
+        pc.y1 = kScreenCenterY + (items[i].y1 - kScreenCenterY) * ky;
         pc.anchor = resolved(anchor);
         pc.hud = true;
         pc.override_index = items[i].override_index;

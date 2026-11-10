@@ -1,4 +1,5 @@
 // Rez: the port's description, settings and hooks.
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 
@@ -32,7 +33,7 @@ constexpr float kWidescreenEpsilon = 0.01f;
 
 void widescreen(dream::System&, float aspect) {
     g_aspect = aspect;
-    g_widescreen = aspect > kOriginalAspect + kWidescreenEpsilon;
+    g_widescreen = std::fabs(aspect - kOriginalAspect) > kWidescreenEpsilon;
 }
 
 const dreamcomp::PortInfo kInfo = [] {
@@ -90,7 +91,11 @@ dreamcomp::RegisterPort g_register(kInfo);
 }  // namespace
 
 DC_HOOK_ENTRY(projection) {  // 0x8C01DB2C: (fr4 horizontal factor, fr5 vertical factor)
-    if (g_widescreen && g_aspect > 0.0f)
-        c.fr[4] *= (4.0f / 3.0f) / g_aspect;
+    if (g_widescreen && g_aspect > 0.0f) {
+        if (g_aspect > kOriginalAspect)
+            c.fr[4] *= kOriginalAspect / g_aspect;
+        else
+            c.fr[5] *= g_aspect / kOriginalAspect;
+    }
     return false;
 }
