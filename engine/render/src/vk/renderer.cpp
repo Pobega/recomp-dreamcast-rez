@@ -475,19 +475,8 @@ struct Translucent {
 };
 
 constexpr std::size_t kMaxRegroupLookahead = 512;
-constexpr std::size_t kMediumSceneTranslucents = 1024;
-constexpr std::size_t kHeavySceneTranslucents = 2500;
-constexpr std::size_t kMediumRegroupLookahead = 128;
-constexpr std::size_t kHeavyRegroupLookahead = 32;
-constexpr std::size_t kMaxPerTriangleTranslucentStrips = 1500;
-
-std::size_t regroup_lookahead_for_scene(std::size_t translucent_count) noexcept {
-    if (translucent_count >= kHeavySceneTranslucents)
-        return kHeavyRegroupLookahead;
-    if (translucent_count >= kMediumSceneTranslucents)
-        return kMediumRegroupLookahead;
-    return kMaxRegroupLookahead;
-}
+constexpr std::size_t kMaxBlockedCandidates = 48;
+constexpr std::size_t kMaxPerTriangleTranslucentStrips = 256;
 
 void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
     const std::size_t n = in.size();
@@ -497,7 +486,6 @@ void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
     thread_local std::vector<std::uint8_t> emitted;
     emitted.assign(n, 0);
 
-    const std::size_t lookahead = regroup_lookahead_for_scene(n);
     for (std::size_t i = 0; i < n; ++i) {
         if (emitted[i])
             continue;
@@ -511,8 +499,9 @@ void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
         const bool cur_additive = state < t_states.size() && t_states[state].additive;
         Box blocker_box{};
         bool has_blocker = false;
+        std::size_t blocked_steps = 0;
 
-        const std::size_t limit = std::min(n, i + 1 + lookahead);
+        const std::size_t limit = std::min(n, i + 1 + kMaxRegroupLookahead);
         for (std::size_t j = i + 1; j < limit; ++j) {
             if (emitted[j])
                 continue;
@@ -529,6 +518,8 @@ void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
                     blocker_box.grow(cand.bb.x1, cand.bb.y1);
                     has_blocker = true;
                 }
+                if (++blocked_steps >= kMaxBlockedCandidates)
+                    break;
             }
         }
     }
@@ -678,14 +669,26 @@ void Renderer::prepare(VkCommandBuffer upload, const Frame& frame) {
     };
     thread_local std::unordered_map<std::uint64_t, Use> used;
     used.clear();
+    std::uint32_t prev_tcw = 0, prev_tsp = 0;
+    bool has_prev = false;
+    Use* prev_use = nullptr;
     for (const auto& list : frame.lists) {
         for (const Polygon& p : list) {
             if (!pcw_texture(p.pcw))
                 continue;
+            if (has_prev && p.tcw == prev_tcw && p.tsp == prev_tsp) {
+                if (!prev_use->tiled && polygon_tiles(frame, p))
+                    prev_use->tiled = true;
+                continue;
+            }
             Use& u = used[texture_key(p)];
             u.tcw = p.tcw;
             u.tsp = p.tsp;
             u.tiled = u.tiled || polygon_tiles(frame, p);
+            prev_tcw = p.tcw;
+            prev_tsp = p.tsp;
+            prev_use = &u;
+            has_prev = true;
         }
     }
     for (const auto& [key, u] : used)
@@ -805,9 +808,13 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
     for (const auto& list : frame.lists) {
         for (const Polygon& p : list) {
             const std::uint32_t f = tsp_fog_control(p.tsp);
-            if (f == 0 || f == 3)
+            if (f == 0 || f == 3) {
                 table_fog = true;
+                break;
+            }
         }
+        if (table_fog)
+            break;
     }
 
     const std::size_t vcount = frame.vertices.size();
@@ -1001,7 +1008,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                 continue;
             }
             const bool is_additive = even < t_states.size() && t_states[even].additive;
-            if (blended && split_translucent_strips && !is_additive && p.count > 3) {
+            if (blended && split_translucent_strips && !is_additive && p.count > 4) {
                 for (std::uint32_t i = 0; i + 2 < p.count; ++i) {
                     const Vertex& a = frame.vertices[p.first + i];
                     const Vertex& b = frame.vertices[p.first + i + 1];
@@ -1019,12 +1026,17 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                 }
                 continue;
             }
-            float nearest = 1e30f;
-            for (std::uint32_t i = 0; i < p.count; ++i)
-                nearest = std::min(nearest, frame.vertices[p.first + i].z);
-            const float key = per_triangle ? p.sort_triangle : p.sort_strip;
-            if (blended && !std::isnan(key))
-                nearest = key;
+            float nearest = 0.0f;
+            if (blended) {
+                const float key = per_triangle ? p.sort_triangle : p.sort_strip;
+                if (!std::isnan(key)) {
+                    nearest = key;
+                } else {
+                    nearest = 1e30f;
+                    for (std::uint32_t i = 0; i < p.count; ++i)
+                        nearest = std::min(nearest, frame.vertices[p.first + i].z);
+                }
+            }
             const Item item{nearest, p.first, p.count, even};
             count(even, p.count);
             if (!blended) {
