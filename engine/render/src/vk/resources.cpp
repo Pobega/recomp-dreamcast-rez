@@ -50,9 +50,10 @@ void HostBuffer::upload_to_target(std::uint32_t gl_target, std::size_t active_by
     if (!gl_buf_)
         glGenBuffers(1, &gl_buf_);
     glBindBuffer(gl_target, gl_buf_);
-    if (storage_.size() > gl_capacity_)
+    if (storage_.size() > gl_capacity_) {
         gl_capacity_ = storage_.size();
-    glBufferData(gl_target, static_cast<GLsizeiptr>(gl_capacity_), nullptr, GL_STREAM_DRAW);
+        glBufferData(gl_target, static_cast<GLsizeiptr>(gl_capacity_), nullptr, GL_DYNAMIC_DRAW);
+    }
     glBufferSubData(gl_target, 0, static_cast<GLsizeiptr>(upload_size), storage_.data());
 }
 
