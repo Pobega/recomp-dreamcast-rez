@@ -29,7 +29,7 @@ Rez Recompiled targets Linux handhelds running PortMaster (`aarch64`). It cross-
    sh tools/build.sh -j8
    sh tools/package.sh
    ```
-   This builds the host translator in `build/host/`, cross-compiles `rez_boot` into `build/target/game/rez-recomp`, and packages `build/rez.zip` containing `Rez.sh`, `rez/tools/rez-patch`, `rez/tools/patchscript`, and the disc-keyed `rez/rez.patch` payload.
+   This builds the host SH-4 translator and `rez-patch` utility in `build/host/`, cross-compiles `rez_boot` (`build/target/game/rez-recomp`) and the target `rez-patch` binary (`build/target/engine/runtime/rez-patch`), and packages `build/rez.zip` containing `Rez.sh`, `rez/tools/rez-patch`, `rez/tools/patchscript`, and the disc-keyed `rez/rez.patch` payload.
 
 4. **Optional Linux Desktop Test Build (`x86_64`)**:
    Because the unified OpenGL ES 3.0 + SDL2 renderer also compiles natively on Linux desktop (with `SDL2` and `GLESv2` headers/libs installed), you can build and run a local test binary in `build/host/`:
@@ -38,4 +38,6 @@ Rez Recompiled targets Linux handhelds running PortMaster (`aarch64`). It cross-
    python3 tools/dc.py run
    ```
 
-Executables built from this repository contain the game's code in translated form, compiled from the builder's own disc. They still need the player's disc to run.
+## How Disc-Keyed Packaging Works
+
+`tools/package.sh` transforms the cross-compiled `build/target/game/rez-recomp` binary into `rez/rez.patch` using the SHA-256 of `1ST_READ.BIN` extracted from the builder's `.chd` disc. No raw executable is distributed inside `build/rez.zip`. On the player's handheld, PortMaster's first-boot patcher invokes `rez/tools/patchscript` and `rez/tools/rez-patch` against the player's own `.chd` disc to verify ownership and reconstruct `rez/rez`.

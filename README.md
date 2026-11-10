@@ -1,46 +1,66 @@
-# Rez Recompiled
-Rez (Sega Dreamcast, 2001) is one of my favourite games.
-This is a recomp of Rez for Linux and PortMaster handhelds. It has been statically recompiled to C++.
-Unlike many recomps, this one does not rely on hardware processor simulation. A large amount of
-time has been spent on performance, targeting handhelds and desktop Linux.
+# Rez Recompiled (PortMaster OpenGL ES 3.0)
 
-<img width="1024" height="768" alt="rez-005" src="https://github.com/user-attachments/assets/53d0e6d9-c97f-4733-afb9-8ba0cb8bdd46" />
+A static C++ recompilation of **Rez** (Sega Dreamcast, 2001) tailored for **PortMaster** Linux handhelds (`aarch64`) and Linux desktop (`x86_64`).
 
-<img width="1024" height="768" alt="rez-010" src="https://github.com/user-attachments/assets/d5418f5a-0142-4789-b04d-3334e38d03d8" />
+Forked from [phobos665/recomp-dreamcast-rez](https://github.com/phobos665/recomp-dreamcast-rez), this port replaces the desktop Vulkan renderer with a lightweight **OpenGL ES 3.0** rendering pipeline, adds multi-aspect handheld display ladders, and integrates PortMaster's first-boot disc verification and patching workflow.
 
-<img width="1024" height="768" alt="rez-012" src="https://github.com/user-attachments/assets/588c3baa-e580-4023-8499-8f2649b6c4c1" />
+## Highlights
 
-<img width="1024" height="768" alt="rez-013" src="https://github.com/user-attachments/assets/2067e11c-ba29-4d92-b376-ee98f64e20c7" />
+- **Static SH-4 Recompilation**: Translates the original Dreamcast binaries (`1ST_READ.BIN` and stage overlays) ahead-of-time into native C++ with no CPU interpreter or JIT overhead.
+- **Unified OpenGL ES 3.0 Renderer**: Built for embedded handheld GPUs across **Mali-G31 MP2** (Anbernic H700 family), **PowerVR GE8300** (TrimUI Brick / Smart Pro), **Mali-G52** (RK3566), and **Adreno**, with no Vulkan requirement.
+- **Clean Room / Disc-Keyed Packaging**: Release packages (`rez.zip`) ship zero Dreamcast executable bytes. On first launch, PortMaster's built-in patcher (`patcher.txt`) verifies the user's `.chd` disc image, extracts `1ST_READ.BIN`, and reconstructs the `rez` executable in ~15 seconds.
+- **In-Game Recomp Settings (`Options -> Recomp Settings`)**:
+  - **Aspect Ratio**: `4:3`, `3:2`, `16:9` (`Hor+` widescreen FOV), and `1:1` (`Vert+` square handheld FOV), with automatic 2D HUD and pause-menu un-stretching and first-boot screen auto-detection.
+  - **Resolution Ladders**: Native handheld resolutions plus sub-native performance step-downs for each aspect ratio:
+    - **`4:3`**: `320x240`, `480x360`, `640x480`, `800x600`, `960x720`, `1024x768`, `1280x960`
+    - **`3:2`**: `360x240`, `480x320`, `540x360`, `720x480`, `960x640`, `1080x720`
+    - **`16:9`**: `426x240`, `640x360`, `854x480`, `960x544`, `1280x720`, `1920x1080`
+    - **`1:1`**: `240x240`, `360x360`, `480x480`, `540x540`, `720x720`
+  - **Frame Rate**: Toggle between `30 fps` (original Dreamcast pacing) and `60 fps` (60 Hz logic and rendering) on the fly.
 
-<img width="1024" height="768" alt="rez-034" src="https://github.com/user-attachments/assets/281baad0-005b-49e1-899a-efa077710aad" />
+## Supported Disc Images
 
-<img width="1024" height="768" alt="rez-035" src="https://github.com/user-attachments/assets/e255606d-0a20-4ed0-ac20-830b8a9aeaba" />
+You must supply your own Dreamcast **Rez** (V1.003) `.chd` disc image:
 
-<img width="1024" height="768" alt="rez-040" src="https://github.com/user-attachments/assets/8038c7d9-c633-4f3a-a595-bf27a1aa5742" />
+| Region | Product ID | Version | CHD SHA-1 |
+|---|---|---|---|
+| **Japan** | `HDR-0178` | `V1.003` | `9711a0d0c21af3685672b9a42c72abf999fc7150` |
+| **Europe** | `MK-5119250` | `V1.003` | `01b7c1cc29a840b141a4ae713037eb1224fac233` |
 
-## Current Features
-- Plays from the Japanese and European releases (V1.003 .chd).
-- Game has been retooled to run at 60hz with optional widescreen.
-- In-game Recomp Settings menu: select aspect ratio (`4:3`, `3:2`, `16:9`, `1:1`), native handheld resolutions with performance step-downs, and frame rate mode (`30 fps` or `60 fps`) with automatic HUD and pause menu scaling.
-- Linux PC: Unified OpenGL ES 3.0 renderer, SDL2 window, sound and controllers.
-- PortMaster (aarch64): Unified OpenGL ES 3.0 architecture running identically on both Mali-G31 MP2 devices (Anbernic H700 RGSP) and PowerVR GE8300 devices (TrimUI Brick) with no Vulkan dependency.
+## Installing on PortMaster
 
-## Install on PortMaster
-1. Download or package `rez.zip`.
-2. Extract `rez.zip` into your `ports/` directory on the SD card (creating `ports/Rez.sh` and `ports/rez/`).
-3. Copy your Rez `.chd` (Japanese or European) to `ports/rez/gamedata/` or `ports/rez/disc/`.
-4. Launch Rez from the Ports menu. On first launch, PortMaster's built-in patcher verifies the `.chd` disc image and reconstructs the game executable automatically (~15 seconds).
-5. Exit hotkey: `Menu + Start` or `Select + Start`.
+1. Download `rez.zip` from the [Releases](https://github.com/Pobega/recomp-dreamcast-rez/releases) page (or build it via `python3 tools/dc.py package`).
+2. Extract `rez.zip` into your SD card's `ports/` directory (creating `ports/Rez.sh` and `ports/rez/`).
+3. Copy your Rez `.chd` disc image into `ports/rez/gamedata/` (or `ports/rez/disc/`).
+4. Launch **Rez** from PortMaster. On first boot, PortMaster's patcher screen will verify your `.chd` and build the executable (~15 seconds).
 
-## Building
-See [BUILDING.md](BUILDING.md).
+## Controls
+
+| Action | Handheld Control | Desktop Keyboard |
+|---|---|---|
+| **Targeting** | D-Pad / Left Stick | Arrow Keys / WASD |
+| **Lock-on / Shoot** | A / B | Space / Z / Enter |
+| **Overdrive** | L1 / L2 / R1 / R2 | X / Left Shift |
+| **Camera View** | X / Y | C / V |
+| **Pause / Menu** | Start | Escape / Return |
+| **Exit Game** | `Menu + Start` or `Select + Start` | `Alt + F4` |
+
+## Configuration & Save Data
+
+- **In-Game Display & FPS Settings**: Persisted automatically to `ports/rez/conf/rez_recompiled/display.cfg`.
+- **Controller Bindings**: Customizable in `ports/rez/conf/rez_recompiled/bindings.txt`.
+- **VMU Save Data**: Stored in `ports/rez/vmu/vmu_save_A1.bin`.
+
+## Building from Source
+
+See [BUILDING.md](BUILDING.md) for instructions on setting up the `aarch64` sysroot toolchain, building for PortMaster or Linux desktop, and generating the `rez.zip` release archive.
 
 ## Credits
-Rez Recompiled is heavily indebted to
-- [**dream-recomp**](https://github.com/phobos665/dream-recomp)
-- [**dreamcomp**](https://github.com/cherryduck/dreamcomp)
-- [**flycast**](https://github.com/flyinghead/flycast)
 
-## Licence
+- [**phobos665 / dream-recomp**](https://github.com/phobos665/recomp-dreamcast-rez) — Original Rez static recompilation and `dream-recomp` engine
+- [**dreamcomp**](https://github.com/cherryduck/dreamcomp) — Dreamcast recompilation research and foundation
+- [**flycast**](https://github.com/flyinghead/flycast) — Dreamcast hardware and Holly/AICA reference
 
-GPL-2.0 ([LICENSE](LICENSE)).
+## License
+
+GPL-2.0 — see [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
