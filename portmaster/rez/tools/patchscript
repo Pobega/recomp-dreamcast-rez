@@ -4,9 +4,21 @@ set -euo pipefail
 GAMEDIR="${GAMEDIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$GAMEDIR"
 
+rm -f "$GAMEDIR/rez.tmp"
+trap 'rm -f "$GAMEDIR/rez.tmp"' EXIT
+
 exec > >(tee -a "$GAMEDIR/patchlog.txt") 2>&1
 
 echo "=== Rez First-Time Disc Verification & Setup ==="
+
+if [ -f "$GAMEDIR/rez.patch" ]; then
+  avail_kb=$(df -Pk "$GAMEDIR" 2>/dev/null | awk 'NR==2 {print $4}')
+  if [ -n "${avail_kb:-}" ] && [ "$avail_kb" -lt 122880 ]; then
+    echo "Error: Insufficient free disk space (${avail_kb} KB available, need at least 120 MB)."
+    echo "Patching process failed!"
+    exit 1
+  fi
+fi
 
 shopt -s nullglob nocaseglob
 disc_files=("$GAMEDIR/disc/"*.chd "$GAMEDIR/gamedata/"*.chd "$GAMEDIR/"*.chd)
