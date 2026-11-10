@@ -18,10 +18,16 @@ uniform vec2 u_offset;
 out vec2 v_uv;
 
 void main() {
-    v_uv = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-    vec2 pos = v_uv * 2.0 - 1.0;
-    vec2 p = pos * u_scale + u_offset;
-    gl_Position = vec4(p.x, -p.y, 0.0, 1.0);
+    const vec2 pos[4] = vec2[4](
+        vec2(0.0, 0.0),
+        vec2(1.0, 0.0),
+        vec2(0.0, 1.0),
+        vec2(1.0, 1.0)
+    );
+    vec2 p = pos[gl_VertexID];
+    v_uv = p;
+    vec2 ndc = (u_offset + p * u_scale) * 2.0 - 1.0;
+    gl_Position = vec4(ndc.x, -ndc.y, 0.0, 1.0);
 }
 )";
 
@@ -42,8 +48,6 @@ out vec4 colour;
 const int kMaxTaps = 4;
 
 void main() {
-    if (any(lessThan(v_uv, vec2(0.0))) || any(greaterThan(v_uv, vec2(1.0))))
-        discard;
     ivec2 n = ivec2(clamp(ceil(u_taps - 0.05), vec2(1.0), vec2(float(kMaxTaps))));
     if (n.x == 1 && n.y == 1) {
         vec4 t = texture(u_image, v_uv);
@@ -236,6 +240,9 @@ bool Presenter::draw_view(VkCommandBuffer, VkImageView view, std::uint32_t width
         }
     }
 
+    offset[0] = (1.0f - scale[0]) * 0.5f;
+    offset[1] = (1.0f - scale[1]) * 0.5f;
+
     const float out_w = static_cast<float>(target.width) * scale[0];
     const float out_h = static_cast<float>(target.height) * scale[1];
     const float taps[2] = {
@@ -276,7 +283,7 @@ bool Presenter::draw_view(VkCommandBuffer, VkImageView view, std::uint32_t width
     glDisable(GL_SCISSOR_TEST);
 
     glBindVertexArray(vao_);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
 
     if (overlay_layer)
@@ -323,7 +330,7 @@ bool Presenter::draw_rect(VkCommandBuffer, VkExtent2D target, int x, int y, std:
     glDisable(GL_SCISSOR_TEST);
 
     glBindVertexArray(vao_);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glBindVertexArray(0);
 
     glDisable(GL_BLEND);

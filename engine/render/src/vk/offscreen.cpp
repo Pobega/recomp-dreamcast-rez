@@ -85,6 +85,9 @@ bool Offscreen::render(Renderer& renderer, const Frame& frame, const FrameGeomet
     renderer.area = area;
     renderer.draw(nullptr, frame, geometry, extent_);
 
+    const GLenum discard_attachments[2] = {GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
+    glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, discard_attachments);
+
     if (after_pass)
         after_pass(nullptr, colour_image(), extent_);
 
