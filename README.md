@@ -21,7 +21,7 @@ time has been spent on performance, targeting handhelds and desktop Linux.
 ## Current Features
 - Plays from the Japanese and European releases (V1.003 .chd).
 - Game has been retooled to run at 60hz with optional widescreen.
-- In-game Recomp Settings menu: toggle between 30 FPS and 60 FPS frame rate modes, and select display resolution (`720x480` 3:2 or `640x480` 4:3) with automatic widescreen HUD and pause menu scaling.
+- In-game Recomp Settings menu: select aspect ratio (`4:3`, `3:2`, `16:9`, `1:1`), native handheld resolutions with performance step-downs, and frame rate mode (`30 fps` or `60 fps`) with automatic HUD and pause menu scaling.
 - Linux PC: Unified OpenGL ES 3.0 renderer, SDL2 window, sound and controllers.
 - PortMaster (aarch64): Unified OpenGL ES 3.0 architecture running identically on both Mali-G31 MP2 devices (Anbernic H700 RGSP) and PowerVR GE8300 devices (TrimUI Brick) with no Vulkan dependency.
 
