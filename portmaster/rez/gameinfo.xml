@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<gameList>
+  <game>
+    <path>./Rez.sh</path>
+    <name>Rez</name>
+    <desc>A rail-shooter music video game developed by United Game Artists and released by Sega for the Dreamcast.</desc>
+    <releasedate>20011122T000000</releasedate>
+    <developer>United Game Artists</developer>
+    <publisher>Sega</publisher>
+    <genre>Action, Arcade, Music</genre>
+    <players>1</players>
+    <image>./screenshot.png</image>
+  </game>
+</gameList>

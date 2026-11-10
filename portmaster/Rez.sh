@@ -28,9 +28,20 @@ mkdir -p "$GAMEDIR/conf/rez_recompiled" "$GAMEDIR/gamedata" "$GAMEDIR/disc"
 export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 
-# Performance profiler: logs 1-second interval stats to log.txt with zero GPU overhead.
+# Performance profiler: set DREAM_PROFILE=1 to log 1-second interval stats to log.txt.
 # Live on-screen HUD toggle: Select + Y (or Menu + Y).
-export DREAM_PROFILE=1
+# export DREAM_PROFILE=1
+
+shopt -s nullglob nocaseglob
+disc_files=("$GAMEDIR/disc/"*.chd "$GAMEDIR/gamedata/"*.chd "$GAMEDIR/"*.chd)
+shopt -u nullglob nocaseglob
+
+if [ ${#disc_files[@]} -eq 0 ]; then
+  pm_message "Missing Rez Dreamcast disc (.chd)! Copy your Japanese or European Rez .chd into ports/rez/gamedata/ or ports/rez/disc/."
+  sleep 5
+  pm_finish
+  exit 1
+fi
 
 $GPTOKEYB "rez" &
 pm_platform_helper "$GAMEDIR/rez"
