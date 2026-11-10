@@ -21,6 +21,7 @@ time has been spent on performance, targeting handhelds and desktop Linux.
 ## Current Features
 - Plays from the Japanese and European releases (V1.003 .chd).
 - Game has been retooled to run at 60hz with optional widescreen.
+- In-game Recomp Settings menu: toggle between 30 FPS and 60 FPS frame rate modes, and select display resolution (`720x480` 3:2 or `640x480` 4:3) with automatic widescreen HUD and pause menu scaling.
 - Linux PC: Unified OpenGL ES 3.0 renderer, SDL2 window, sound and controllers.
 - PortMaster (aarch64): Unified OpenGL ES 3.0 architecture running identically on both Mali-G31 MP2 devices (Anbernic H700 RGSP) and PowerVR GE8300 devices (TrimUI Brick) with no Vulkan dependency.
 
@@ -28,7 +29,7 @@ time has been spent on performance, targeting handhelds and desktop Linux.
 1. Download or package `rez.zip`.
 2. Extract `rez.zip` into your `ports/` directory on the SD card (creating `ports/Rez.sh` and `ports/rez/`).
 3. Copy your Rez `.chd` (Japanese or European) to `ports/rez/gamedata/` or `ports/rez/disc/`.
-4. Launch Rez from the Ports menu.
+4. Launch Rez from the Ports menu. On first launch, PortMaster's built-in patcher verifies the `.chd` disc image and reconstructs the game executable automatically (~15 seconds).
 5. Exit hotkey: `Menu + Start` or `Select + Start`.
 
 ## Building
