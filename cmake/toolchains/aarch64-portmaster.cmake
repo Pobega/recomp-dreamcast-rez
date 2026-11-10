@@ -26,13 +26,13 @@ set(CMAKE_CXX_COMPILER_TARGET aarch64-nextui-linux-gnu)
 # Assembly too (libchdr's LZMA decoder has an arm64 one); without a target clang assembles for the host.
 set(CMAKE_ASM_COMPILER clang)
 set(CMAKE_ASM_COMPILER_TARGET aarch64-nextui-linux-gnu)
-set(_portmaster_flags "--gcc-toolchain=${DREAMCOMP_TOOLCHAIN_ROOT} -mcpu=cortex-a53")
+set(_portmaster_flags "--gcc-toolchain=${DREAMCOMP_TOOLCHAIN_ROOT} -mcpu=cortex-a53 -ffunction-sections -fdata-sections")
 set(CMAKE_C_FLAGS_INIT "${_portmaster_flags}")
 set(CMAKE_CXX_FLAGS_INIT "${_portmaster_flags}")
 set(CMAKE_ASM_FLAGS_INIT "${_portmaster_flags}")
 # The device's libstdc++ is older than the toolchain's headers may assume: link the C++ runtime in.
-set(CMAKE_EXE_LINKER_FLAGS_INIT "${_portmaster_flags} -fuse-ld=lld -static-libstdc++ -static-libgcc")
-set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_portmaster_flags} -fuse-ld=lld -static-libstdc++ -static-libgcc")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "${_portmaster_flags} -fuse-ld=lld -static-libstdc++ -static-libgcc -Wl,--gc-sections")
+set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_portmaster_flags} -fuse-ld=lld -static-libstdc++ -static-libgcc -Wl,--gc-sections")
 # GCC 8's std::filesystem lives in a library of its own, and glibc 2.28's threads too (before 2.34).
 set(CMAKE_CXX_STANDARD_LIBRARIES "-lstdc++fs -lpthread")
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)

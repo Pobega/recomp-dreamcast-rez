@@ -95,15 +95,15 @@ function(dream_add_game id)
 
   add_executable(${id}_boot ${DREAM_ROOT}/runtime/boot/boot_main.cpp ${_units})
   target_link_libraries(${id}_boot PRIVATE dream::runtime dream::translator)
-  # --window needs the Vulkan backend, which is optional (render/CMakeLists.txt returns early when
-  # Vulkan, SDL3 or glslc are missing). Without it the launcher still builds and runs headless, and
+  # --window needs the renderer backend, which is optional (render/CMakeLists.txt returns early when
+  # SDL2 or GLES3 headers are missing). Without it the launcher still builds and runs headless, and
   # --window says this build has no renderer rather than doing nothing.
   if(TARGET dream_render_vk)
     target_link_libraries(${id}_boot PRIVATE dream::render_vk)
     target_compile_definitions(${id}_boot PRIVATE DREAM_WITH_RENDERER)
   endif()
-  # Sound is optional in the same way and independent of the renderer: a build with SDL3 but no
-  # Vulkan still makes sound, and a build with neither still records through --wav.
+  # Sound is optional in the same way and independent of the renderer: a build with SDL2 but no
+  # renderer still makes sound, and a build with neither still records through --wav.
   if(TARGET dream_audio)
     target_link_libraries(${id}_boot PRIVATE dream::audio)
     target_compile_definitions(${id}_boot PRIVATE DREAM_WITH_AUDIO)
@@ -113,6 +113,6 @@ function(dream_add_game id)
     # Hundreds of megabytes of generated C++: the optimiser stays modest by default. DREAM_GEN_OPT
     # raises it where run time matters more than build time.
     set(DREAM_GEN_OPT "-O1" CACHE STRING "Optimisation flag for the translated code")
-    set_source_files_properties(${_units} PROPERTIES COMPILE_OPTIONS "${DREAM_GEN_OPT}")
+    set_source_files_properties(${_units} PROPERTIES COMPILE_OPTIONS "${DREAM_GEN_OPT};-fno-asynchronous-unwind-tables")
   endif()
 endfunction()

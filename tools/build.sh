@@ -26,6 +26,6 @@ cmake -S . -B "$B" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DDREAM_RENDERER=ON \
     -DDREAM_TRANSLATE_EXECUTABLE="$TRANSLATE" \
-    -DDREAM_GEN_OPT="${GEN_OPT:--O2}" > "$B.configure.log"
+    -DDREAM_GEN_OPT="${GEN_OPT:--Os}" > "$B.configure.log"
 ninja -C "$B" "$@" rez_boot
 echo "portmaster: built $B/game/rez-recomp"

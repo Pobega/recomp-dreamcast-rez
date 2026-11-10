@@ -30,13 +30,14 @@ cp game/rez-pipelines.txt "$PKG/rez/rez-pipelines.txt"
 
 cp portmaster/rez/port.json "$PKG/rez/port.json"
 cp portmaster/rez/README.md "$PKG/rez/README.md"
+[ -f portmaster/rez/gameinfo.xml ] && cp portmaster/rez/gameinfo.xml "$PKG/rez/gameinfo.xml"
+[ -f portmaster/rez/screenshot.png ] && cp portmaster/rez/screenshot.png "$PKG/rez/screenshot.png"
 
 cp LICENSE "$PKG/rez/licenses/rez-recomp-GPL-2.0.txt"
 cp THIRD_PARTY_NOTICES.md "$PKG/rez/licenses/THIRD_PARTY_NOTICES.md"
 cp engine/third_party/libchdr/LICENSE.txt "$PKG/rez/licenses/libchdr-BSD-3-Clause.txt"
 cp engine/third_party/libchdr/deps/lzma-26.02/LICENSE "$PKG/rez/licenses/lzma.txt"
 cp engine/third_party/tomlplusplus/LICENSE "$PKG/rez/licenses/tomlplusplus-MIT.txt"
-cp assets/fonts/OFL.txt "$PKG/rez/licenses/NotoSans-OFL-1.1.txt"
 
 rm -f "$ZIP"
 python3 - "$PKG" "$ZIP" <<'EOF'
@@ -53,6 +54,7 @@ with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
             path = os.path.join(root, name)
             rel = os.path.relpath(path, src)
             zinfo = zipfile.ZipInfo.from_file(path, rel)
+            zinfo.compress_type = zipfile.ZIP_DEFLATED
             # Preserve executable permissions in external_attr
             st = os.stat(path)
             zinfo.external_attr = (st.st_mode & 0xFFFF) << 16
