@@ -285,8 +285,11 @@ struct Live {
             return;
         if (new_aspect)
             render_aspect_ = want_render_aspect;
-        if (new_scale)
+        if (new_scale) {
             scale_ = want_scale;
+            if (scale_ != dream::host::HostControls::kScalePanel && !aspect_forced_)
+                render_aspect_ = want_render_aspect = 0.0f;
+        }
         std::uint32_t w = 0, h = 0;
         target_size(render_aspect_, w, h);
         if (scale_ == dream::host::HostControls::kScalePanel && w > 0 && h > 0)
@@ -330,6 +333,7 @@ struct Live {
     bool start(unsigned scale, const std::string& title, float render_aspect = 0.0f,
                bool fullscreen = false) {
         scale_ = scale;
+        aspect_forced_ = render_aspect > 0.0f;
         render_aspect_ = want_render_aspect = render_aspect;
         // --render-aspect: an anamorphic widescreen title still addresses a 640x480
         // screen, but its view is squeezed horizontally; drawing it into a target that is wider
@@ -1472,6 +1476,7 @@ public:
     bool interpolate = false, pace_interpolation = true, have_prev = false, interp_ready = false;
     unsigned scale_ = 1;
     float render_aspect_ = 0.0f, want_render_aspect = 0.0f;
+    bool aspect_forced_ = false;
     static constexpr unsigned kNoScale = ~0u;
     unsigned want_scale = kNoScale;  // a scale asked for at run time (kScalePanel too)
     bool await_render = false;
@@ -2245,8 +2250,9 @@ int main(int argc, char** argv) {
                 lp->want_scale = sc == dream::host::HostControls::kScalePanel ? sc : std::clamp(sc, 1u, 8u);
             };
             hc.render_size = [lp](unsigned sc, unsigned& w, unsigned& h) {
+                const float aspect = (sc == dream::host::HostControls::kScalePanel) ? lp->render_aspect_ : 0.0f;
                 std::uint32_t tw = 0, th = 0;
-                lp->target_size(sc, lp->render_aspect_, tw, th);
+                lp->target_size(sc, aspect, tw, th);
                 w = tw, h = th;
             };
             hc.window_aspect = [lp] {
@@ -2440,11 +2446,13 @@ int main(int argc, char** argv) {
             // A stall of more than a few frames (loading, the window dragged) is not caught up:
             // the frames that took too long are gone, and sprinting would only stutter the audio.
             if (!phased) {
-                if (due.time_since_epoch().count() == 0 ||
-                    now - (due + step) > std::chrono::milliseconds(50))
+                if (due.time_since_epoch().count() == 0)
                     due = now;
-                else
+                else {
                     due += step;
+                    if (due < now)
+                        due = now;
+                }
                 if (due > now)
                     std::this_thread::sleep_until(due);
             }
