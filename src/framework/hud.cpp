@@ -198,6 +198,20 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
     auto type_of = [](const dream::render::Polygon& p) { return p.pcw >> 29; };  // 5 sprite, 4 polygon
     // A primitive drawn at one depth (every vertex the same 1/w): 2D.
     auto flat = [&](const dream::render::Polygon& p, float& z) {
+        if (p.line_batch) {
+            if (p.first >= frame.lines.size())
+                return false;
+            const auto& lb = frame.lines[p.first];
+            if (lb.count == 0 || lb.first + lb.count > frame.line_edges.size())
+                return false;
+            z = frame.line_edges[lb.first].za;
+            for (std::uint32_t i = 0; i < lb.count; ++i) {
+                const auto& le = frame.line_edges[lb.first + i];
+                if (le.za != z || le.zb != z)
+                    return false;
+            }
+            return true;
+        }
         const std::uint32_t type = type_of(p);
         if (p.count == 0 || (type != 5u && type != 4u))
             return false;
@@ -208,12 +222,25 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
         return true;
     };
     auto eligible = [&](const dream::render::Polygon& p) {
+        if (p.line_batch)
+            return rule.polygons;
         const std::uint32_t type = type_of(p);
         return type == 5u || (rule.polygons && type == 4u);
     };
     auto rect = [&](const dream::render::Polygon& p, float& x0, float& x1, float& y0, float& y1) {
         x0 = y0 = 1e30f;
         x1 = y1 = -1e30f;
+        if (p.line_batch) {
+            const auto& lb = frame.lines[p.first];
+            for (std::uint32_t i = 0; i < lb.count; ++i) {
+                const auto& le = frame.line_edges[lb.first + i];
+                x0 = std::min({x0, le.xa, le.xb});
+                x1 = std::max({x1, le.xa, le.xb});
+                y0 = std::min({y0, le.ya, le.yb});
+                y1 = std::max({y1, le.ya, le.yb});
+            }
+            return;
+        }
         for (std::uint32_t i = 0; i < p.count; ++i) {
             const auto& v = frame.vertices[p.first + i];
             x0 = std::min(x0, v.x);
@@ -353,14 +380,27 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
         }
     }
     std::vector<int> box_of(n, -1);
+    std::vector<bool> line_batch_done(frame.lines.size(), false);
     for (std::size_t i = 0; i < n; ++i) {
         const std::size_t r = root(i);
         const float anchor = anchor_x(gforced[r], 0.5f * (gx0[r] + gx1[r]), edges);
         const auto& p = *items[i].poly;
         if (apply) {
-            for (std::uint32_t v = 0; v < p.count; ++v) {
-                auto& vx = frame.vertices[p.first + v];
-                vx.x = anchor + (vx.x - anchor) * k;
+            if (p.line_batch) {
+                if (!line_batch_done[p.first]) {
+                    line_batch_done[p.first] = true;
+                    const auto& lb = frame.lines[p.first];
+                    for (std::uint32_t e = 0; e < lb.count; ++e) {
+                        auto& le = frame.line_edges[lb.first + e];
+                        le.xa = anchor + (le.xa - anchor) * k;
+                        le.xb = anchor + (le.xb - anchor) * k;
+                    }
+                }
+            } else {
+                for (std::uint32_t v = 0; v < p.count; ++v) {
+                    auto& vx = frame.vertices[p.first + v];
+                    vx.x = anchor + (vx.x - anchor) * k;
+                }
             }
             ++stats.corrected;
         }
