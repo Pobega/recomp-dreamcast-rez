@@ -212,7 +212,7 @@ float expanded_target(float window_aspect) {
     const float a = g_fixed_aspect > 0.0f ? g_fixed_aspect
                     : window_aspect > 0.0f ? window_aspect
                                            : 16.0f / 9.0f;
-    return std::clamp(a, 4.0f / 3.0f, g_port ? g_port->max_aspect : 4.0f / 3.0f);
+    return std::clamp(a, 1.0f, g_port ? g_port->max_aspect : 16.0f / 9.0f);
 }
 
 std::filesystem::path find_disc_in_folders(const std::string& config_path,
@@ -322,14 +322,31 @@ public:
         }
         add_texture_flags(args, g_settings.file().parent_path());
         add_input_and_mod_flags(args, g_settings.file().parent_path());
-        // Expanded starts at 16:9 (the window opens at that shape) and then follows the window.
-        g_aspect_now.store(expanded_aspect() ? expanded_target(0.0f) : 4.0f / 3.0f,
-                           std::memory_order_relaxed);
-        const float aspect = target_aspect();
-        if (aspect > 4.0f / 3.0f + 0.01f && g_port->widescreen_anamorphic &&
-            !has_flag(args, "--render-aspect")) {
-            args.push_back("--render-aspect");
-            args.push_back(std::to_string(aspect));
+        const std::string res_str = g_settings.get("resolution");
+        if (!res_str.empty()) {
+            unsigned rw = 0, rh = 0;
+            if (std::sscanf(res_str.c_str(), "%ux%u", &rw, &rh) == 2 && rw > 0 && rh > 0) {
+                const float r = static_cast<float>(rw) / static_cast<float>(rh);
+                g_aspect_now.store(r, std::memory_order_relaxed);
+                if (!has_flag(args, "--resolution")) {
+                    args.push_back("--resolution");
+                    args.push_back(res_str);
+                }
+                if (!has_flag(args, "--render-aspect") && g_port && g_port->widescreen_anamorphic) {
+                    args.push_back("--render-aspect");
+                    args.push_back(std::to_string(r));
+                }
+            }
+        } else {
+            // Expanded starts at 16:9 (the window opens at that shape) and then follows the window.
+            g_aspect_now.store(expanded_aspect() ? expanded_target(0.0f) : 4.0f / 3.0f,
+                               std::memory_order_relaxed);
+            const float aspect = target_aspect();
+            if (std::fabs(aspect - 4.0f / 3.0f) > 0.01f && g_port && g_port->widescreen_anamorphic &&
+                !has_flag(args, "--render-aspect")) {
+                args.push_back("--render-aspect");
+                args.push_back(std::to_string(aspect));
+            }
         }
         if (g_settings.get_bool("fullscreen", false) && !has_flag(args, "--fullscreen"))
             args.push_back("--fullscreen");
@@ -476,20 +493,49 @@ public:
         // (include/dreamcomp/sharp2d.h).
         sharp_2d_ = g_settings.get_bool("sharp_2d", true);
         apply_presentation();
-        if (expanded_aspect()) {
-            const float pa = current_panel_aspect();
-            g_aspect_now.store(expanded_target(pa > 0.0f ? pa : 0.0f), std::memory_order_relaxed);
-        } else {
-            g_aspect_now.store(4.0f / 3.0f, std::memory_order_relaxed);
-        }
+
         auto& hc = dream::host::host_controls();
-        if (g_port && g_port->widescreen_anamorphic && hc.set_render_aspect)
-            hc.set_render_aspect(g_aspect_now.load(std::memory_order_relaxed));
+        if (g_settings.get("resolution").empty()) {
+            unsigned pw = 0, ph = 0;
+            if (hc.panel_size)
+                hc.panel_size(pw, ph);
+            if (pw == 0 || ph == 0) {
+                pw = 640;
+                ph = 480;
+            }
+            const float ratio = static_cast<float>(pw) / static_cast<float>(ph);
+            AspectFamily fam = AspectFamily::Ratio4x3;
+            if (ratio < 1.15f)
+                fam = AspectFamily::Ratio1x1;
+            else if (ratio < 1.41f)
+                fam = AspectFamily::Ratio4x3;
+            else if (ratio < 1.63f)
+                fam = AspectFamily::Ratio3x2;
+            else
+                fam = AspectFamily::Ratio16x9;
+
+            const auto& opts = resolution_options(fam);
+            unsigned best_idx = 0;
+            for (unsigned i = 0; i < opts.size(); ++i) {
+                if (opts[i].w == static_cast<int>(pw) && opts[i].h == static_cast<int>(ph)) {
+                    best_idx = i;
+                    break;
+                }
+                if (opts[i].w <= static_cast<int>(pw) && opts[i].h <= static_cast<int>(ph)) {
+                    best_idx = i;
+                }
+            }
+            set_aspect_family(fam);
+            set_resolution_index(best_idx);
+        } else {
+            set_resolution_index(current_resolution_index());
+        }
+
         if (g_port && g_port->on_start)
             g_port->on_start(sys, g_settings);
-        std::printf("rez: %s, settings %s%s\n", g_port && g_port->title ? g_port->title : "?",
+        std::printf("rez: %s, settings %s, aspect %.3f\n", g_port && g_port->title ? g_port->title : "?",
                     g_settings.file().string().c_str(),
-                    expanded_aspect() ? ", aspect expanded" : ", aspect original");
+                    target_aspect());
     }
 
     // Expanded: the view follows the window's shape. A new shape is taken once the window has
@@ -497,6 +543,8 @@ public:
     // every frame. Original: back to 4:3.
     void follow_window() {
         if (!g_port || !g_port->widescreen)
+            return;
+        if (!g_settings.get("resolution").empty() || !g_settings.get("aspect_family").empty())
             return;
         auto& hc = dream::host::host_controls();
         const float win_a = (render_scale() == kScalePanel)
@@ -749,7 +797,7 @@ public:
     }
 
 private:
-    static bool widescreen() { return target_aspect() > 4.0f / 3.0f + 0.01f; }
+    static bool widescreen() { return std::fabs(target_aspect() - 4.0f / 3.0f) > 0.01f; }
 
     static void apply_presentation() {
 #ifdef DREAMCOMP_HAS_PRESENTER
@@ -829,6 +877,135 @@ void render_size(int scale, int& w, int& h) {
     else if (scale != kScalePanel)
         tw = 640u * static_cast<unsigned>(scale), th = 480u * static_cast<unsigned>(scale);
     w = static_cast<int>(tw), h = static_cast<int>(th);
+}
+
+const char* aspect_family_label(AspectFamily family) {
+    switch (family) {
+        case AspectFamily::Ratio4x3: return "4:3";
+        case AspectFamily::Ratio3x2: return "3:2";
+        case AspectFamily::Ratio16x9: return "16:9";
+        case AspectFamily::Ratio1x1: return "1:1";
+        default: return "4:3";
+    }
+}
+
+float aspect_family_ratio(AspectFamily family) {
+    switch (family) {
+        case AspectFamily::Ratio4x3: return 4.0f / 3.0f;
+        case AspectFamily::Ratio3x2: return 3.0f / 2.0f;
+        case AspectFamily::Ratio16x9: return 16.0f / 9.0f;
+        case AspectFamily::Ratio1x1: return 1.0f;
+        default: return 4.0f / 3.0f;
+    }
+}
+
+const std::vector<ResolutionOption>& resolution_options(AspectFamily family) {
+    static const std::vector<ResolutionOption> k4x3 = {
+        {320, 240, "320x240"}, {480, 360, "480x360"}, {640, 480, "640x480"},
+        {960, 720, "960x720"}, {1024, 768, "1024x768"}, {1280, 960, "1280x960"}
+    };
+    static const std::vector<ResolutionOption> k3x2 = {
+        {360, 240, "360x240"}, {480, 320, "480x320"}, {540, 360, "540x360"},
+        {720, 480, "720x480"}, {1080, 720, "1080x720"}
+    };
+    static const std::vector<ResolutionOption> k16x9 = {
+        {640, 360, "640x360"}, {854, 480, "854x480"}, {960, 544, "960x544"},
+        {1280, 720, "1280x720"}
+    };
+    static const std::vector<ResolutionOption> k1x1 = {
+        {360, 360, "360x360"}, {480, 480, "480x480"}, {540, 540, "540x540"},
+        {720, 720, "720x720"}
+    };
+    switch (family) {
+        case AspectFamily::Ratio4x3: return k4x3;
+        case AspectFamily::Ratio3x2: return k3x2;
+        case AspectFamily::Ratio16x9: return k16x9;
+        case AspectFamily::Ratio1x1: return k1x1;
+        default: return k4x3;
+    }
+}
+
+AspectFamily current_aspect_family() {
+    const std::string fam_str = g_settings.get("aspect_family");
+    if (fam_str == "3:2") return AspectFamily::Ratio3x2;
+    if (fam_str == "16:9") return AspectFamily::Ratio16x9;
+    if (fam_str == "1:1") return AspectFamily::Ratio1x1;
+    if (fam_str == "4:3") return AspectFamily::Ratio4x3;
+    const std::string res_str = g_settings.get("resolution");
+    if (!res_str.empty()) {
+        unsigned rw = 0, rh = 0;
+        if (std::sscanf(res_str.c_str(), "%ux%u", &rw, &rh) == 2 && rw > 0 && rh > 0) {
+            const float r = static_cast<float>(rw) / static_cast<float>(rh);
+            if (r < 1.15f) return AspectFamily::Ratio1x1;
+            if (r < 1.41f) return AspectFamily::Ratio4x3;
+            if (r < 1.63f) return AspectFamily::Ratio3x2;
+            return AspectFamily::Ratio16x9;
+        }
+    }
+    return AspectFamily::Ratio4x3;
+}
+
+unsigned current_resolution_index() {
+    const AspectFamily fam = current_aspect_family();
+    const auto& opts = resolution_options(fam);
+    const std::string res_str = g_settings.get("resolution");
+    for (unsigned i = 0; i < opts.size(); ++i) {
+        if (res_str == opts[i].label)
+            return i;
+    }
+    for (unsigned i = 0; i < opts.size(); ++i) {
+        if (opts[i].h == 480 || (fam == AspectFamily::Ratio1x1 && opts[i].h == 720))
+            return i;
+    }
+    return 0;
+}
+
+void set_resolution_index(unsigned index) {
+    const AspectFamily fam = current_aspect_family();
+    const auto& opts = resolution_options(fam);
+    if (index >= opts.size())
+        index = static_cast<unsigned>(opts.size() - 1);
+    const auto& opt = opts[index];
+    const float ratio = static_cast<float>(opt.w) / static_cast<float>(opt.h);
+    g_aspect_now.store(ratio, std::memory_order_relaxed);
+    auto& hc = dream::host::host_controls();
+    if (hc.set_render_resolution)
+        hc.set_render_resolution(static_cast<unsigned>(opt.w), static_cast<unsigned>(opt.h));
+    if (hc.set_render_aspect)
+        hc.set_render_aspect(ratio);
+    g_settings.set("resolution", opt.label);
+    g_settings.set("aspect_family", aspect_family_label(fam));
+    g_settings.save();
+    std::printf("rez: set resolution %dx%d (aspect %.3f)\n", opt.w, opt.h, ratio);
+}
+
+void set_aspect_family(AspectFamily family) {
+    g_settings.set("aspect_family", aspect_family_label(family));
+    const auto& opts = resolution_options(family);
+    unsigned default_idx = 0;
+    auto& hc = dream::host::host_controls();
+    unsigned pw = 0, ph = 0;
+    if (hc.panel_size)
+        hc.panel_size(pw, ph);
+    bool found_panel = false;
+    if (pw > 0 && ph > 0) {
+        for (unsigned i = 0; i < opts.size(); ++i) {
+            if (opts[i].w == static_cast<int>(pw) && opts[i].h == static_cast<int>(ph)) {
+                default_idx = i;
+                found_panel = true;
+                break;
+            }
+        }
+    }
+    if (!found_panel) {
+        for (unsigned i = 0; i < opts.size(); ++i) {
+            if (opts[i].h == 480 || (family == AspectFamily::Ratio1x1 && opts[i].h == 720)) {
+                default_idx = i;
+                break;
+            }
+        }
+    }
+    set_resolution_index(default_idx);
 }
 
 RegisterPort::RegisterPort(const PortInfo& info) { g_port = &info; }

@@ -238,6 +238,11 @@ struct Live {
     // kScalePanel: the largest 4:3 picture the window's own pixels hold, so the presenter copies
     // one pixel to one pixel.
     void target_size(unsigned scale, float render_aspect, std::uint32_t& w, std::uint32_t& h) const {
+        if (custom_w_ > 0 && custom_h_ > 0 && scale == scale_) {
+            w = custom_w_;
+            h = custom_h_;
+            return;
+        }
         if (scale == dream::host::HostControls::kScalePanel) {
             int pw = 0, ph = 0;
             window.pixel_size(pw, ph);
@@ -274,15 +279,23 @@ struct Live {
     // A new scale (Resolution applied in game) takes the same path.
     bool retarget_wanted() const {
         return (want_render_aspect > 0.0f && std::fabs(want_render_aspect - render_aspect_) >= 0.005f) ||
-               (want_scale != kNoScale && want_scale != scale_);
+               (want_scale != kNoScale && want_scale != scale_) ||
+               ((want_w > 0 && want_h > 0) && (want_w != custom_w_ || want_h != custom_h_));
     }
 
     void retarget() {
         const bool new_aspect =
             want_render_aspect > 0.0f && std::fabs(want_render_aspect - render_aspect_) >= 0.005f;
         const bool new_scale = want_scale != kNoScale && want_scale != scale_;
-        if (!new_aspect && !new_scale)
+        const bool new_res = (want_w > 0 && want_h > 0) && (want_w != custom_w_ || want_h != custom_h_);
+        if (!new_aspect && !new_scale && !new_res)
             return;
+        if (new_res) {
+            custom_w_ = want_w;
+            custom_h_ = want_h;
+            want_w = want_h = 0;
+            render_aspect_ = want_render_aspect = static_cast<float>(custom_w_) / static_cast<float>(custom_h_);
+        }
         if (new_aspect)
             render_aspect_ = want_render_aspect;
         if (new_scale) {
@@ -1479,6 +1492,8 @@ public:
     bool aspect_forced_ = false;
     static constexpr unsigned kNoScale = ~0u;
     unsigned want_scale = kNoScale;  // a scale asked for at run time (kScalePanel too)
+    std::uint32_t custom_w_ = 0, custom_h_ = 0;
+    std::uint32_t want_w = 0, want_h = 0;
     bool await_render = false;
     bool interpolate_only_above_60 = false;
     dream::render::vk::Offscreen interp_off;
@@ -1625,6 +1640,7 @@ void usage(const char* argv0, std::FILE* out) {
         "  --window               open a window and play; implies sound\n"
         "  --scale N              draw at N times the guest's 640x480 (1 to 8, default 1), or\n"
         "                         'panel': the display's own pixels (the largest 4:3 they hold)\n"
+        "  --resolution WxH       render resolution in pixels (e.g. 720x480)\n"
         "  --render-aspect A      render target shape for anamorphic widescreen (e.g. 1.7778)\n"
         "  --fullscreen           start fullscreen (Alt+Enter toggles)\n"
         "  --interpolate          draw a blended frame between two game frames (needs a display\n"
@@ -1712,6 +1728,7 @@ int main(int argc, char** argv) {
 #ifdef DREAM_WITH_RENDERER
     // --present-mode: vsync paces the run to the panel. Nothing about the guest changes either way.
     auto present_mode = dream::render::vk::Window::PresentMode::Fifo;
+    unsigned init_custom_w = 0, init_custom_h = 0;
 #endif
     // --bindings FILE: where the controller layout is read from and written back to. Unset means
     // the host's per-user settings directory, so one layout follows the player across every title.
@@ -1853,6 +1870,14 @@ int main(int argc, char** argv) {
             texture_pack = argv[++i];
         else if (!std::strcmp(argv[i], "--dump-textures") && i + 1 < argc)
             dump_textures = argv[++i];
+        else if (!std::strcmp(argv[i], "--resolution") && i + 1 < argc) {
+            unsigned rw = 0, rh = 0;
+            if (std::sscanf(argv[++i], "%ux%u", &rw, &rh) == 2 && rw > 0 && rh > 0) {
+                init_custom_w = rw;
+                init_custom_h = rh;
+                render_aspect = static_cast<float>(rw) / static_cast<float>(rh);
+            }
+        }
         else if (!std::strcmp(argv[i], "--render-aspect") && i + 1 < argc)
             render_aspect = std::strtof(argv[++i], nullptr);
         else if (!std::strcmp(argv[i], "--fullscreen"))
@@ -2190,6 +2215,8 @@ int main(int argc, char** argv) {
         live->window.set_present_mode(present_mode);
         live->screenshot_at = screenshot_at;
         live->screenshot_dir = screenshot_dir;
+        live->custom_w_ = init_custom_w;
+        live->custom_h_ = init_custom_h;
         // The window names the title being run. The config is the only place that name is written
         // down for a human, and a config without one still gets a window with a name on it.
         if (!live->start(
@@ -2236,7 +2263,32 @@ int main(int argc, char** argv) {
             hc.set_render_scale = [lp](unsigned sc) {
                 lp->want_scale = sc == dream::host::HostControls::kScalePanel ? sc : std::clamp(sc, 1u, 8u);
             };
+            hc.set_render_resolution = [lp](unsigned w, unsigned h) {
+                lp->want_w = w;
+                lp->want_h = h;
+            };
+            hc.panel_size = [lp](unsigned& w, unsigned& h) {
+                int pw = 0, ph = 0;
+                lp->window.pixel_size(pw, ph);
+                if (pw > 0 && ph > 0) {
+                    w = static_cast<unsigned>(pw);
+                    h = static_cast<unsigned>(ph);
+                } else {
+                    w = 640;
+                    h = 480;
+                }
+            };
             hc.render_size = [lp](unsigned sc, unsigned& w, unsigned& h) {
+                if (lp->want_w > 0 && lp->want_h > 0) {
+                    w = lp->want_w;
+                    h = lp->want_h;
+                    return;
+                }
+                if (lp->custom_w_ > 0 && lp->custom_h_ > 0) {
+                    w = lp->custom_w_;
+                    h = lp->custom_h_;
+                    return;
+                }
                 const float aspect = (sc == dream::host::HostControls::kScalePanel) ? lp->render_aspect_ : 0.0f;
                 std::uint32_t tw = 0, th = 0;
                 lp->target_size(sc, aspect, tw, th);

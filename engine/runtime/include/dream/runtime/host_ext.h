@@ -112,6 +112,8 @@ struct HostControls {
     // display's own resolution, the largest 4:3 picture its pixels hold.
     static constexpr unsigned kScalePanel = 0;
     std::function<void(unsigned)> set_render_scale;
+    std::function<void(unsigned w, unsigned h)> set_render_resolution;
+    std::function<void(unsigned& w, unsigned& h)> panel_size;
     // The render target's size for a scale (kScalePanel included) at the current shape.
     std::function<void(unsigned scale, unsigned& w, unsigned& h)> render_size;
     // The controller bindings file: an overlay that edits bindings writes this file,

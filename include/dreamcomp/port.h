@@ -14,6 +14,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 namespace dream {
 class System;
@@ -97,6 +98,28 @@ int render_scale();
 void set_render_scale(int scale);
 void render_size(int scale, int& w, int& h);
 int render_scale_high();
+
+struct ResolutionOption {
+    int w;
+    int h;
+    const char* label;
+};
+
+enum class AspectFamily : unsigned {
+    Ratio4x3 = 0,
+    Ratio3x2 = 1,
+    Ratio16x9 = 2,
+    Ratio1x1 = 3,
+    Count = 4
+};
+
+const char* aspect_family_label(AspectFamily family);
+float aspect_family_ratio(AspectFamily family);
+AspectFamily current_aspect_family();
+void set_aspect_family(AspectFamily family);
+const std::vector<ResolutionOption>& resolution_options(AspectFamily family);
+unsigned current_resolution_index();
+void set_resolution_index(unsigned index);
 
 struct RegisterPort {
     explicit RegisterPort(const PortInfo& info);
