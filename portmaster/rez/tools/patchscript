@@ -1,0 +1,35 @@
+#!/bin/bash
+set -euo pipefail
+
+GAMEDIR="${GAMEDIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+cd "$GAMEDIR"
+
+exec > >(tee -a "$GAMEDIR/patchlog.txt") 2>&1
+
+echo "=== Rez First-Time Disc Verification & Setup ==="
+
+shopt -s nullglob nocaseglob
+disc_files=("$GAMEDIR/disc/"*.chd "$GAMEDIR/gamedata/"*.chd "$GAMEDIR/"*.chd)
+shopt -u nullglob nocaseglob
+
+if [ ${#disc_files[@]} -eq 0 ]; then
+  echo "Error: No Rez .chd disc image found in disc/ or gamedata/."
+  echo "Patching process failed!"
+  exit 1
+fi
+
+CHD_FILE="${disc_files[0]}"
+echo "Found disc image: $(basename "$CHD_FILE")"
+
+echo "Verifying disc SHA-1 and extracting 1ST_READ.BIN..."
+"$GAMEDIR/tools/rez-patch" --extract-verify "$CHD_FILE" "$GAMEDIR/extracted/fs/1ST_READ.BIN"
+
+if [ -f "$GAMEDIR/rez.patch" ]; then
+  echo "Reconstructing Rez executable from disc keystream..."
+  "$GAMEDIR/tools/rez-patch" --crypt "$GAMEDIR/extracted/fs/1ST_READ.BIN" "$GAMEDIR/rez.patch" - | gzip -dc > "$GAMEDIR/rez.tmp"
+  chmod +x "$GAMEDIR/rez.tmp"
+  mv "$GAMEDIR/rez.tmp" "$GAMEDIR/rez"
+  rm -f "$GAMEDIR/rez.patch"
+fi
+
+echo "Patching process completed successfully!"

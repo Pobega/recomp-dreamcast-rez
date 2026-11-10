@@ -43,6 +43,26 @@ if [ ${#disc_files[@]} -eq 0 ]; then
   exit 1
 fi
 
+if [ -f "$GAMEDIR/rez.patch" ] || [ ! -x "$GAMEDIR/rez" ] || [ ! -f "$GAMEDIR/extracted/fs/1ST_READ.BIN" ]; then
+  chmod +x "$GAMEDIR/tools/patchscript" "$GAMEDIR/tools/rez-patch" 2>/dev/null || true
+  export PATCHER_FILE="$GAMEDIR/tools/patchscript"
+  export PATCHER_GAME="$(basename "${0%.*}")"
+  export PATCHER_TIME="about 15 seconds"
+  if [ -f "$controlfolder/patcher.txt" ]; then
+    source "$controlfolder/patcher.txt"
+    $ESUDO kill -9 $(pidof gptokeyb) 2>/dev/null || true
+  else
+    pm_message "First-time setup: verifying Rez disc and patching executable (~15 seconds)..."
+    "$GAMEDIR/tools/patchscript"
+  fi
+  if [ ! -x "$GAMEDIR/rez" ]; then
+    pm_message "Rez patching failed! Check ports/rez/patchlog.txt for details."
+    sleep 5
+    pm_finish
+    exit 1
+  fi
+fi
+
 $GPTOKEYB "rez" &
 pm_platform_helper "$GAMEDIR/rez"
 ./rez
