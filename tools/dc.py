@@ -176,7 +176,7 @@ def cmd_build(a) -> int:
         if a.extra:
             cmd += a.extra
         else:
-            cmd += [f"{info['id']}_boot"]
+            cmd += [f"{info['id']}_boot", "rez-patch"]
         run(cmd)
         return 0
 

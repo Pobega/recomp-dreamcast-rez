@@ -30,3 +30,7 @@ target_include_directories(dream_runtime SYSTEM PUBLIC ${DREAM_ROOT}/third_party
 target_link_libraries(dream_runtime PUBLIC chdr-static)
 dream_target_defaults(dream_runtime)
 add_library(dream::runtime ALIAS dream_runtime)
+
+add_executable(rez-patch src/patch/rez_patch.cpp)
+target_link_libraries(rez-patch PRIVATE dream_runtime)
+dream_target_defaults(rez-patch)

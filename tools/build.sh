@@ -14,7 +14,7 @@ TRANSLATE="$PWD/build/host/engine/translator/dream-translate"
 if [ ! -x "$TRANSLATE" ]; then
     echo "portmaster: building host translator ($TRANSLATE)..."
     cmake -S . -B build/host -G Ninja -DCMAKE_BUILD_TYPE=Release
-    ninja -C build/host dream-translate
+    ninja -C build/host dream-translate rez-patch
 fi
 [ -x "$TRANSLATE" ] || { echo "portmaster: translator build failed ($TRANSLATE)"; exit 2; }
 
@@ -27,5 +27,5 @@ cmake -S . -B "$B" -G Ninja \
     -DDREAM_RENDERER=ON \
     -DDREAM_TRANSLATE_EXECUTABLE="$TRANSLATE" \
     -DDREAM_GEN_OPT="${GEN_OPT:--Os}" > "$B.configure.log"
-ninja -C "$B" "$@" rez_boot
+ninja -C "$B" "$@" rez_boot rez-patch
 echo "portmaster: built $B/game/rez-recomp"
