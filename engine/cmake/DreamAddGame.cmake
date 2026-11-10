@@ -94,7 +94,7 @@ function(dream_add_game id)
     VERBATIM)
 
   add_executable(${id}_boot ${DREAM_ROOT}/runtime/boot/boot_main.cpp ${_units})
-  target_link_libraries(${id}_boot PRIVATE dream::runtime dream::translator)
+  target_link_libraries(${id}_boot PRIVATE dream::runtime dream::game_config)
   # --window needs the renderer backend, which is optional (render/CMakeLists.txt returns early when
   # SDL2 or GLES3 headers are missing). Without it the launcher still builds and runs headless, and
   # --window says this build has no renderer rather than doing nothing.

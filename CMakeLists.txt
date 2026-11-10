@@ -28,7 +28,7 @@ add_library(dreamcomp_core OBJECT src/framework/core.cpp src/framework/settings.
                                   src/framework/disc_folder.cpp)
 target_include_directories(dreamcomp_core PUBLIC ${PROJECT_SOURCE_DIR}/include
                                                  ${PROJECT_SOURCE_DIR}/src/framework)
-target_link_libraries(dreamcomp_core PUBLIC dream::runtime dream::render dream::translator)
+target_link_libraries(dreamcomp_core PUBLIC dream::runtime dream::render dream::game_config)
 target_compile_features(dreamcomp_core PUBLIC cxx_std_20)
 target_compile_options(dreamcomp_core PRIVATE ${DREAMCOMP_WARNINGS})
 if(TARGET dream_render_vk)
