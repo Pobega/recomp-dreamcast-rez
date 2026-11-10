@@ -35,8 +35,13 @@ log.txt
 *.log
 __pycache__/
 *.pyc
+*~
+*.swp
+.vscode/
+.idea/
 
 # Local agent notes
 CLAUDE.md
 CLAUDE.local.md
 .claude/
+.gemini/

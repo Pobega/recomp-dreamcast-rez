@@ -347,12 +347,6 @@ public:
         // "exact" keeps the Dreamcast's 59.94 Hz.
         if (g_settings.get("frame_timing", "display") != "exact" && !has_flag(args, "--sync-display"))
             args.push_back("--sync-display");
-        // Latency: "low" presents through DXGI on Windows (about 13 ms less where every frame is
-        // finished in time); "standard" (default) through the Vulkan swapchain.
-        if (g_settings.get("latency", "standard") == "low" && !has_flag(args, "--present-path")) {
-            args.push_back("--present-path");
-            args.push_back("dxgi");
-        }
 
         // For the in-game menu (wants_overlay()).
         config_path_ = flag_value(args, "--config");

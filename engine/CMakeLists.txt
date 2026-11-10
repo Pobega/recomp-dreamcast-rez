@@ -18,8 +18,7 @@ endif()
 
 option(DREAM_WERROR "Treat warnings as errors in dream targets" ON)
 option(DREAM_RENDERER
-  "Build the Vulkan renderer and the SDL3 window. Needs the Vulkan SDK and SDL3; without
-   them the rest of the project still builds." ON)
+  "Build the OpenGL ES 3.0 renderer and SDL2 window. Without them the rest of the project still builds." ON)
 
 include(cmake/DreamTargetDefaults.cmake)
 include(cmake/DreamAddGame.cmake)

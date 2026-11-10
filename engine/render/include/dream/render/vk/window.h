@@ -47,8 +47,6 @@ public:
 
     enum class PresentMode { Fifo, Mailbox, Immediate };
     void set_present_mode(PresentMode m) noexcept { wanted_present_ = m; }
-    enum class PresentPath { Auto, Vulkan, Dxgi };
-    void set_present_path(PresentPath p) noexcept { wanted_path_ = p; }
     std::string present_path() const;
 
     bool flips() const noexcept { return false; }
@@ -158,7 +156,6 @@ private:
     bool pad_menu_button_ = true;
     bool game_input_blocked_ = false;
     PresentMode wanted_present_ = PresentMode::Fifo;
-    PresentPath wanted_path_ = PresentPath::Auto;
 
     int input_fd_ = -1;
     std::uint32_t input_buttons_ = 0;

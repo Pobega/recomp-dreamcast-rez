@@ -1634,7 +1634,6 @@ void usage(const char* argv0, std::FILE* out) {
         "                         game's (60 Hz for a 59.94 Hz game: +0.1%% speed, no repeats)\n"
         "  --fps                  start with the on-screen frame-rate counter showing\n"
         "  --profile              log 1-second performance telemetry to stdout\n"
-        "  --present-path P       vulkan (default) or dxgi (Windows: flip model, lower latency)\n"
         "  --present-mode M       vsync (default), mailbox or immediate\n"
         "  --cache-dir DIR        keep the pipeline cache there (default: beside the bindings)\n"
         "  --pipeline-keys FILE   make these pipeline variants at the start (hex keys, one a line)\n"
@@ -1713,10 +1712,6 @@ int main(int argc, char** argv) {
 #ifdef DREAM_WITH_RENDERER
     // --present-mode: vsync paces the run to the panel. Nothing about the guest changes either way.
     auto present_mode = dream::render::vk::Window::PresentMode::Fifo;
-    // --present-path vulkan|dxgi: dxgi presents through a DXGI flip-model swapchain on Windows, a
-    // refresh sooner than some drivers' Vulkan swapchains where the machine has the headroom
-    // (dxgi_present.h).
-    auto present_path = dream::render::vk::Window::PresentPath::Auto;
 #endif
     // --bindings FILE: where the controller layout is read from and written back to. Unset means
     // the host's per-user settings directory, so one layout follows the player across every title.
@@ -1783,13 +1778,6 @@ int main(int argc, char** argv) {
         else if (!std::strcmp(argv[i], "--wav") && i + 1 < argc)
             wav = argv[++i];
 #ifdef DREAM_WITH_RENDERER
-        else if (!std::strcmp(argv[i], "--present-path") && i + 1 < argc) {
-            const char* p = argv[++i];
-            using PP = dream::render::vk::Window::PresentPath;
-            present_path = !std::strcmp(p, "vulkan") ? PP::Vulkan
-                           : !std::strcmp(p, "dxgi") ? PP::Dxgi
-                                                     : PP::Auto;
-        }
         else if (!std::strcmp(argv[i], "--present-mode") && i + 1 < argc) {
             const char* m = argv[++i];
             using PM = dream::render::vk::Window::PresentMode;
@@ -2200,7 +2188,6 @@ int main(int argc, char** argv) {
         live->show_fps = start_with_fps;
         live->enable_profile = enable_profile;
         live->window.set_present_mode(present_mode);
-        live->window.set_present_path(present_path);
         live->screenshot_at = screenshot_at;
         live->screenshot_dir = screenshot_dir;
         // The window names the title being run. The config is the only place that name is written
