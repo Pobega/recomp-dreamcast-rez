@@ -23,7 +23,7 @@ fail_patch() {
 
 log_msg "=== Rez First-Time Disc Verification & Setup ==="
 
-mkdir -p "$GAMEDIR/conf/rez_recompiled" "$GAMEDIR/gamedata" "$GAMEDIR/disc" "$GAMEDIR/extracted/fs"
+mkdir -p "$GAMEDIR/conf/rez_recompiled" "$GAMEDIR/gamedata" "$GAMEDIR/extracted/fs"
 
 if [ -f "$GAMEDIR/rez.patch" ]; then
   avail_kb=$(df -Pk "$GAMEDIR" 2>/dev/null | awk 'NR==2 {print $4}')
@@ -33,7 +33,7 @@ if [ -f "$GAMEDIR/rez.patch" ]; then
 fi
 
 shopt -s nullglob nocaseglob
-disc_files=("$GAMEDIR/gamedata/"*.chd "$GAMEDIR/disc/"*.chd "$GAMEDIR/"*.chd)
+disc_files=("$GAMEDIR/gamedata/"*.chd "$GAMEDIR/"*.chd)
 shopt -u nullglob nocaseglob
 
 if [ ${#disc_files[@]} -eq 0 ]; then

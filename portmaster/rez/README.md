@@ -6,7 +6,7 @@ Statically recompiled Sega Dreamcast port of **Rez** for PortMaster (`aarch64`).
 
 OpenGL ES 3.0 support is required (`reqs: ["power", "!lowres"]`). Runs across Mali-G31 MP2 (Anbernic H700), PowerVR GE8300 (TrimUI Brick / Smart Pro), Mali-G52 (RK3566), and higher-tier ARM handhelds.
 
-Place a valid Rez V1.003 `.chd` disc image into `ports/rez/gamedata/` (or `ports/rez/disc/`):
+Place a valid Rez V1.003 `.chd` disc image into `ports/rez/gamedata/`:
 - **Japanese Release** (`HDR-0178`):
   `SHA-1: 9711a0d0c21af3685672b9a42c72abf999fc7150`
 - **European Release** (`MK-5119250`):

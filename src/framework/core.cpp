@@ -229,7 +229,6 @@ std::filesystem::path find_disc_in_folders(const std::string& config_path,
     if (!custom_dir.empty())
         search_dirs.push_back(custom_dir);
     search_dirs.push_back(base_dir / "gamedata");
-    search_dirs.push_back(base_dir / "disc");
 
     for (const auto& dir : search_dirs) {
         std::error_code ec;

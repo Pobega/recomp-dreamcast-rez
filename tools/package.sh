@@ -19,9 +19,8 @@ fi
 [ -x "$HOST_PATCH" ] || { echo "package: host rez-patch build failed"; exit 2; }
 
 rm -rf "$PKG"
-mkdir -p "$PKG/rez/gamedata" "$PKG/rez/disc" "$PKG/rez/licenses" "$PKG/rez/tools"
+mkdir -p "$PKG/rez/gamedata" "$PKG/rez/licenses" "$PKG/rez/tools"
 [ -f portmaster/rez/gamedata/.gitkeep ] && cp portmaster/rez/gamedata/.gitkeep "$PKG/rez/gamedata/.gitkeep"
-[ -f portmaster/rez/disc/.gitkeep ] && cp portmaster/rez/disc/.gitkeep "$PKG/rez/disc/.gitkeep"
 
 cp portmaster/Rez.sh "$PKG/Rez.sh"
 chmod +x "$PKG/Rez.sh"
