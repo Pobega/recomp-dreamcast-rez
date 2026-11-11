@@ -34,6 +34,6 @@ Open **Options -> Recomp Settings** from the main menu to configure:
 
 ## Configuration & Saves
 
-- Display and frame rate settings are saved in `conf/rez_recompiled/display.cfg`.
+- Display and frame rate settings are saved in `conf/rez_recompiled/settings.ini`.
 - Custom controller bindings can be edited in `conf/rez_recompiled/bindings.txt`.
 - Dreamcast VMU save data is stored in `vmu/vmu_save_A1.bin`.

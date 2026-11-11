@@ -47,7 +47,7 @@ You must supply your own Dreamcast **Rez** (V1.003) `.chd` disc image:
 
 ## Configuration & Save Data
 
-- **In-Game Display & FPS Settings**: Persisted automatically to `ports/rez/conf/rez_recompiled/display.cfg`.
+- **In-Game Display & FPS Settings**: Persisted automatically to `ports/rez/conf/rez_recompiled/settings.ini`.
 - **Controller Bindings**: Customizable in `ports/rez/conf/rez_recompiled/bindings.txt`.
 - **VMU Save Data**: Stored in `ports/rez/vmu/vmu_save_A1.bin`.
 
