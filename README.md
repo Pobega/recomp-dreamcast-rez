@@ -29,7 +29,7 @@ You must supply your own Dreamcast **Rez** (V1.003) `.chd` disc image:
 
 ## Installing on PortMaster
 
-1. Download `rez.zip` from the [Releases](https://github.com/Pobega/recomp-dreamcast-rez/releases) page (or build it via `python3 tools/dc.py package`).
+1. Download `rez.zip` from the [Releases](https://github.com/Pobega/rez-portmaster/releases) page (or build it via `python3 tools/dc.py package`).
 2. Extract `rez.zip` into your SD card's `ports/` directory (creating `ports/Rez.sh` and `ports/rez/`).
 3. Copy your Rez `.chd` disc image into `ports/rez/gamedata/`.
 4. Launch **Rez** from PortMaster. On first boot, PortMaster's patcher screen will verify your `.chd` and build the executable (~15 seconds).
