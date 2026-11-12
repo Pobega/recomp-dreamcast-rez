@@ -77,7 +77,8 @@ bool Sink::open(unsigned rate) {
     want.freq = static_cast<int>(rate);
     want.format = AUDIO_S16SYS;
     want.channels = 2;
-    want.samples = 512;
+    constexpr Uint16 kAudioDeviceSamples = 1024;
+    want.samples = kAudioDeviceSamples;
     want.callback = &Device::callback;
     want.userdata = d;
     d->id = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);  // SDL converts to the device's format

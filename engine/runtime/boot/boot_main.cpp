@@ -339,6 +339,7 @@ struct Live {
             rtt_on = rtt_off.create(window.context(), w, h);
         }
         await_render = true;
+        presented_seq_ = 0;
         std::printf("window: render target now %ux%u (aspect %.3f)\n", w, h,
                     static_cast<double>(render_aspect_));
     }
@@ -548,8 +549,10 @@ struct Live {
             }
             return;
         }
-        if (!threaded_)
+        if (!threaded_) {
             note_target(regs);
+            ++rendered_seq_;
+        }
     }
 
     // --- the render thread ------------------------------------------------------------------------
@@ -624,8 +627,10 @@ struct Live {
         if (!threaded_)
             return;
         std::unique_lock<std::mutex> lock(jobs_mutex_);
+        release_gl_requested_ = true;
+        jobs_cv_.notify_all();
         idle_cv_.wait(lock, [this] {
-            return decode_jobs_.empty() && !decode_busy_ && jobs_.empty() && !busy_;
+            return decode_jobs_.empty() && !decode_busy_ && jobs_.empty() && !busy_ && !release_gl_requested_;
         });
     }
 
@@ -850,6 +855,7 @@ public:
         if (!(rtt_on && (regs[0x060 / 4] & 0x01000000u) != 0)) {
             await_render = false;
             note_target(regs);
+            ++rendered_seq_;
         }
         push(std::move(job));
     }
@@ -859,16 +865,21 @@ public:
         bool context_held = false;
         for (;;) {
             if (jobs_.empty()) {
-                if (context_held) {
-                    window.release_gl_context();
-                    context_held = false;
+                if (release_gl_requested_ || quit_) {
+                    if (context_held) {
+                        window.release_gl_context();
+                        context_held = false;
+                    }
+                    release_gl_requested_ = false;
+                    idle_cv_.notify_all();
                 }
-                jobs_cv_.wait(lock, [this] { return quit_ || !jobs_.empty(); });
-                if (jobs_.empty()) {
+                jobs_cv_.wait(lock, [this] { return quit_ || release_gl_requested_ || !jobs_.empty(); });
+                if (quit_ && jobs_.empty()) {
                     if (context_held)
                         window.release_gl_context();
-                    return;  // asked to stop, and everything queued is drawn
+                    return;
                 }
+                continue;
             }
             if (!context_held) {
                 window.acquire_gl_context();
@@ -1048,6 +1059,12 @@ public:
         if (threaded_) {
             if (from_renderer && !menu.is_open() && !overlay_up &&
                 !window.pressed(Control::Screenshot)) {
+                if (rendered_seq_ != 0 && rendered_seq_ == presented_seq_ &&
+                    show_fps == presented_show_fps_ && screenshot_at.empty()) {
+                    return true;
+                }
+                presented_seq_ = rendered_seq_;
+                presented_show_fps_ = show_fps;
                 RenderJob job = take_job();
                 job.present = true;
                 job.shown = shown;
@@ -1057,6 +1074,7 @@ public:
             }
             drain();
         }
+        presented_seq_ = 0;
         ScopedGlContext gl_ctx(window);
         if (interpolate && interp_ready && from_renderer && !offscreen.readback &&
             !menu.is_open() && !overlay_up) {
@@ -1582,6 +1600,10 @@ private:
     std::deque<RenderJob> jobs_;
     std::vector<RenderJob> spare_;  // finished render jobs, their vectors reused
     bool busy_ = false, quit_ = false;
+    bool release_gl_requested_ = false;
+    std::uint64_t rendered_seq_ = 0;
+    std::uint64_t presented_seq_ = 0;
+    bool presented_show_fps_ = false;
     unsigned presents_queued_ = 0;  // present jobs queued or running
     dream::render::DisplayList rt_decoder_;  // the render thread's, or the decode thread's
     std::vector<std::uint32_t> decode_copy_;  // the decode thread's copy of a render's borrowed words
@@ -2485,13 +2507,11 @@ int main(int argc, char** argv) {
             // A stall of more than a few frames (loading, the window dragged) is not caught up:
             // the frames that took too long are gone, and sprinting would only stutter the audio.
             if (!phased) {
-                if (due.time_since_epoch().count() == 0)
+                if (due.time_since_epoch().count() == 0 ||
+                    now - (due + step) > std::chrono::milliseconds(50))
                     due = now;
-                else {
+                else
                     due += step;
-                    if (due < now)
-                        due = now;
-                }
                 if (due > now)
                     std::this_thread::sleep_until(due);
             }
