@@ -24,9 +24,10 @@ struct FrameGeometry {
     FogSettings fog;
 };
 
-struct ShaderUniforms {
+struct GeomUniforms {
     std::int32_t u_scale = -1;
     std::int32_t u_offset = -1;
+    std::int32_t u_depth = -1;
     std::int32_t u_mode = -1;
     std::int32_t u_alpha_ref = -1;
     std::int32_t u_fog_vert = -1;
@@ -34,9 +35,12 @@ struct ShaderUniforms {
     std::int32_t u_clip = -1;
     std::int32_t u_tex = -1;
 };
+using ShaderUniforms = GeomUniforms;
 
 class Renderer {
 public:
+    enum class ModVol : std::uint32_t { Xor, Or, Inclusion, Exclusion, Final };
+
     Renderer() = default;
     ~Renderer();
     Renderer(const Renderer&) = delete;
@@ -79,27 +83,22 @@ private:
     };
     static PipelineKey key_from_bits(std::uint32_t bits);
 
-    enum class ModVol : std::uint32_t { Xor, Or, Inclusion, Exclusion, Final };
-    void draw_modifier_volumes(const Frame& frame, const FrameGeometry& geometry);
-
+    void draw_modifier_volumes(const Frame& frame, const FrameGeometry& geometry,
+                               const float depth_params[3]);
 
     Context* ctx_ = nullptr;
     std::uint32_t prog_geom_nd_ = 0;
     std::uint32_t prog_geom_d_ = 0;
-    std::uint32_t prog_lines_nd_ = 0;
-    std::uint32_t prog_lines_d_ = 0;
     std::uint32_t prog_modvol_ = 0;
 
-    ShaderUniforms u_geom_nd_;
-    ShaderUniforms u_geom_d_;
-    ShaderUniforms u_lines_nd_;
-    ShaderUniforms u_lines_d_;
+    GeomUniforms u_geom_nd_;
+    GeomUniforms u_geom_d_;
     std::int32_t u_mv_scale_ = -1;
     std::int32_t u_mv_offset_ = -1;
+    std::int32_t u_mv_depth_ = -1;
     std::int32_t u_mv_alpha_ = -1;
 
     std::uint32_t geom_vao_ = 0;
-    std::uint32_t lines_vao_ = 0;
     std::uint32_t modvol_vao_ = 0;
 
     TextureCache textures_;
@@ -109,7 +108,6 @@ private:
     static constexpr unsigned kVertexRing = 4;
     HostBuffer vertex_ring_[kVertexRing];
     HostBuffer index_ring_[kVertexRing];
-    HostBuffer line_ring_[kVertexRing];
     unsigned ring_next_ = 0;
 
     static constexpr unsigned kModvolRing = 4;

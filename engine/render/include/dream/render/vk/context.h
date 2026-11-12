@@ -49,6 +49,7 @@ struct DeviceCapabilities {
     bool sampler_anisotropy = false;
     bool win32_interop = false;
     bool dma_buf = false;
+    bool zero_to_one_depth = false;
     std::uint32_t max_texture_size = 0;
     std::string device_name;
 };

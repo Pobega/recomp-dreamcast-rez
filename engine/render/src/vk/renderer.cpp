@@ -18,19 +18,12 @@ namespace {
 
 constexpr std::size_t kVertexBytes = sizeof(Vertex) + sizeof(float);
 
-struct LineInstance {
-    float a[4];
-    float b[4];
-    std::uint32_t base;
-    std::uint32_t offset;
-    float half_width;
-};
-
 constexpr const char* kGeomVertSource = R"(#version 300 es
 precision highp float;
 
 uniform vec2 u_scale;
 uniform vec2 u_offset;
+uniform vec3 u_depth;
 
 layout(location = 0) in vec3 in_pos;
 layout(location = 1) in vec2 in_uv;
@@ -41,81 +34,21 @@ layout(location = 4) in float in_fog;
 out mediump vec4 v_base;
 out mediump vec4 v_offset;
 out vec2 v_uv;
-out mediump float v_fog;
+out highp float v_fog_w;
 
 vec4 clip_position(vec3 p) {
-    float inv_w = clamp(p.z, 1e-20, 131072.0);
+    float inv_w = clamp(p.z, 1e-20, u_depth.z);
     float w = 1.0 / inv_w;
-    return vec4((p.xy * u_scale + u_offset) * w, (2.0 / 131072.0) - w, w);
+    return vec4((p.xy * u_scale + u_offset) * w, u_depth.x + u_depth.y * w, w);
 }
 
 void main() {
     v_base = in_base.zyxw;
     v_offset = in_offset.zyxw;
     v_uv = in_uv;
-    v_fog = in_fog;
-    gl_Position = clip_position(in_pos);
-}
-)";
-
-constexpr const char* kLinesVertSource = R"(#version 300 es
-precision highp float;
-
-uniform vec2 u_scale;
-uniform vec2 u_offset;
-
-layout(location = 0) in vec4 in_a;
-layout(location = 1) in vec4 in_b;
-layout(location = 2) in vec4 in_base;
-layout(location = 3) in vec4 in_offset;
-layout(location = 4) in float in_half;
-
-out mediump vec4 v_base;
-out mediump vec4 v_offset;
-out vec2 v_uv;
-out mediump float v_fog;
-
-vec4 clip_position(vec3 p) {
-    float inv_w = clamp(p.z, 1e-20, 131072.0);
-    float w = 1.0 / inv_w;
-    return vec4((p.xy * u_scale + u_offset) * w, (2.0 / 131072.0) - w, w);
-}
-
-void main() {
-    float f6 = in_b.x - in_a.x;
-    float f5 = in_b.y - in_a.y;
-    float s = inversesqrt(f6 * f6 + f5 * f5) * in_half;
-    f5 *= s;
-    f6 *= s;
-    if (0.0 > f5) {
-        f5 = -f5;
-        f6 = -f6;
-    }
-    vec3 pos;
-    float fog;
-    switch (gl_VertexID) {
-        case 0:
-            pos = vec3(in_b.x - f5, in_b.y + f6, in_b.z);
-            fog = in_b.w;
-            break;
-        case 1:
-            pos = vec3(in_b.x + f5, in_b.y - f6, in_b.z);
-            fog = in_b.w;
-            break;
-        case 2:
-            pos = vec3(in_a.x - f5, in_a.y + f6, in_a.z);
-            fog = in_a.w;
-            break;
-        default:
-            pos = vec3(in_a.x + f5, in_a.y - f6, in_a.z);
-            fog = in_a.w;
-            break;
-    }
-    v_base = in_base.zyxw;
-    v_offset = in_offset.zyxw;
-    v_uv = vec2(0.0);
-    v_fog = fog;
-    gl_Position = clip_position(pos);
+    vec4 clip = clip_position(in_pos);
+    v_fog_w = in_fog * clip.w;
+    gl_Position = clip;
 }
 )";
 
@@ -126,19 +59,20 @@ precision highp int;
 
 uniform int u_mode;
 uniform float u_alpha_ref;
-uniform mediump vec4 u_fog_vert;
-uniform mediump vec4 u_fog_ram;
+uniform highp vec4 u_fog_vert;
+uniform highp vec4 u_fog_ram;
 uniform vec4 u_clip;
 uniform mediump sampler2D s_tex;
 
 in mediump vec4 v_base;
 in mediump vec4 v_offset;
 in vec2 v_uv;
-in mediump float v_fog;
+in highp float v_fog_w;
 
 layout(location = 0) out mediump vec4 o_colour;
 
 void main() {
+    highp float v_fog = v_fog_w * gl_FragCoord.w;
     int mode = u_mode;
     mediump vec4 base = v_base;
     if ((mode & 64) == 0)
@@ -184,19 +118,20 @@ precision highp int;
 
 uniform int u_mode;
 uniform float u_alpha_ref;
-uniform mediump vec4 u_fog_vert;
-uniform mediump vec4 u_fog_ram;
+uniform highp vec4 u_fog_vert;
+uniform highp vec4 u_fog_ram;
 uniform vec4 u_clip;
 uniform mediump sampler2D s_tex;
 
 in mediump vec4 v_base;
 in mediump vec4 v_offset;
 in vec2 v_uv;
-in mediump float v_fog;
+in highp float v_fog_w;
 
 layout(location = 0) out mediump vec4 o_colour;
 
 void main() {
+    highp float v_fog = v_fog_w * gl_FragCoord.w;
     int mode = u_mode;
     if ((mode & 512) != 0 && gl_FragCoord.x >= u_clip.x && gl_FragCoord.x < u_clip.z &&
         gl_FragCoord.y >= u_clip.y && gl_FragCoord.y < u_clip.w)
@@ -252,13 +187,14 @@ precision highp float;
 
 uniform vec2 u_scale;
 uniform vec2 u_offset;
+uniform vec3 u_depth;
 
 layout(location = 0) in vec3 in_pos;
 
 vec4 clip_position(vec3 p) {
-    float inv_w = clamp(p.z, 1e-20, 131072.0);
+    float inv_w = clamp(p.z, 1e-20, u_depth.z);
     float w = 1.0 / inv_w;
-    return vec4((p.xy * u_scale + u_offset) * w, (2.0 / 131072.0) - w, w);
+    return vec4((p.xy * u_scale + u_offset) * w, u_depth.x + u_depth.y * w, w);
 }
 
 void main() {
@@ -313,6 +249,7 @@ GLuint link_program(GLuint vs, GLuint fs, std::string& err) {
 void query_uniforms(GLuint prog, ShaderUniforms& u) {
     u.u_scale = glGetUniformLocation(prog, "u_scale");
     u.u_offset = glGetUniformLocation(prog, "u_offset");
+    u.u_depth = glGetUniformLocation(prog, "u_depth");
     u.u_mode = glGetUniformLocation(prog, "u_mode");
     u.u_alpha_ref = glGetUniformLocation(prog, "u_alpha_ref");
     u.u_fog_vert = glGetUniformLocation(prog, "u_fog_vert");
@@ -404,6 +341,8 @@ inline std::uint32_t depth_key(float f) noexcept {
     return (b & 0x80000000u) ? ~b : (b | 0x80000000u);
 }
 
+// PowerVR depth z is reciprocal 1/w (smaller = further away, larger = nearer),
+// so ascending depth_key order draws back-to-front while preserving submission order on ties.
 void sort_back_to_front(std::vector<std::uint64_t>& pairs) {
     const std::size_t n = pairs.size();
     thread_local std::vector<std::uint64_t> spare;
@@ -476,7 +415,6 @@ struct Translucent {
 
 constexpr std::size_t kMaxRegroupLookahead = 512;
 constexpr std::size_t kMaxBlockedCandidates = 48;
-constexpr std::size_t kMaxPerTriangleTranslucentStrips = 256;
 
 void regroup(const std::vector<Translucent>& in, std::vector<Item>& out) {
     const std::size_t n = in.size();
@@ -554,42 +492,36 @@ bool Renderer::create(Context& ctx, VkRenderPass) {
     ctx_ = &ctx;
 
     GLuint vs_geom = compile_shader(GL_VERTEX_SHADER, kGeomVertSource, error_);
-    GLuint vs_lines = compile_shader(GL_VERTEX_SHADER, kLinesVertSource, error_);
     GLuint fs_nd = compile_shader(GL_FRAGMENT_SHADER, kFragNoDiscardSource, error_);
     GLuint fs_d = compile_shader(GL_FRAGMENT_SHADER, kFragDiscardSource, error_);
     GLuint vs_mv = compile_shader(GL_VERTEX_SHADER, kModvolVertSource, error_);
     GLuint fs_mv = compile_shader(GL_FRAGMENT_SHADER, kModvolFragSource, error_);
 
-    if (!vs_geom || !vs_lines || !fs_nd || !fs_d || !vs_mv || !fs_mv)
+    if (!vs_geom || !fs_nd || !fs_d || !vs_mv || !fs_mv)
         return false;
 
     prog_geom_nd_ = link_program(vs_geom, fs_nd, error_);
     prog_geom_d_ = link_program(vs_geom, fs_d, error_);
-    prog_lines_nd_ = link_program(vs_lines, fs_nd, error_);
-    prog_lines_d_ = link_program(vs_lines, fs_d, error_);
     prog_modvol_ = link_program(vs_mv, fs_mv, error_);
 
     glDeleteShader(vs_geom);
-    glDeleteShader(vs_lines);
     glDeleteShader(fs_nd);
     glDeleteShader(fs_d);
     glDeleteShader(vs_mv);
     glDeleteShader(fs_mv);
 
-    if (!prog_geom_nd_ || !prog_geom_d_ || !prog_lines_nd_ || !prog_lines_d_ || !prog_modvol_)
+    if (!prog_geom_nd_ || !prog_geom_d_ || !prog_modvol_)
         return false;
 
     query_uniforms(prog_geom_nd_, u_geom_nd_);
     query_uniforms(prog_geom_d_, u_geom_d_);
-    query_uniforms(prog_lines_nd_, u_lines_nd_);
-    query_uniforms(prog_lines_d_, u_lines_d_);
 
     u_mv_scale_ = glGetUniformLocation(prog_modvol_, "u_scale");
     u_mv_offset_ = glGetUniformLocation(prog_modvol_, "u_offset");
+    u_mv_depth_ = glGetUniformLocation(prog_modvol_, "u_depth");
     u_mv_alpha_ = glGetUniformLocation(prog_modvol_, "u_alpha");
 
     glGenVertexArrays(1, &geom_vao_);
-    glGenVertexArrays(1, &lines_vao_);
     glGenVertexArrays(1, &modvol_vao_);
 
     if (!textures_.create(ctx)) {
@@ -605,10 +537,6 @@ void Renderer::destroy() {
         glDeleteVertexArrays(1, &geom_vao_);
         geom_vao_ = 0;
     }
-    if (lines_vao_) {
-        glDeleteVertexArrays(1, &lines_vao_);
-        lines_vao_ = 0;
-    }
     if (modvol_vao_) {
         glDeleteVertexArrays(1, &modvol_vao_);
         modvol_vao_ = 0;
@@ -621,21 +549,12 @@ void Renderer::destroy() {
         glDeleteProgram(prog_geom_d_);
         prog_geom_d_ = 0;
     }
-    if (prog_lines_nd_) {
-        glDeleteProgram(prog_lines_nd_);
-        prog_lines_nd_ = 0;
-    }
-    if (prog_lines_d_) {
-        glDeleteProgram(prog_lines_d_);
-        prog_lines_d_ = 0;
-    }
     if (prog_modvol_) {
         glDeleteProgram(prog_modvol_);
         prog_modvol_ = 0;
     }
     for (auto& b : vertex_ring_) b.destroy();
     for (auto& b : index_ring_) b.destroy();
-    for (auto& b : line_ring_) b.destroy();
     for (auto& b : modvol_ring_) b.destroy();
     textures_.destroy();
     frame_sets_.clear();
@@ -695,7 +614,60 @@ void Renderer::prepare(VkCommandBuffer upload, const Frame& frame) {
         frame_sets_[key] = textures_.get(upload, u.tcw, u.tsp, u.tiled);
 }
 
-void Renderer::draw_modifier_volumes(const Frame& frame, const FrameGeometry& geometry) {
+void set_modvol_stencil_state(Renderer::ModVol mode, std::uint32_t cull) {
+    apply_pvr_cull_mode(static_cast<std::uint8_t>(cull));
+    switch (mode) {
+        case Renderer::ModVol::Xor:
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_GREATER);
+            glDepthMask(GL_FALSE);
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            glDisable(GL_BLEND);
+            glStencilMask(2);
+            glStencilFunc(GL_ALWAYS, 2, 0);
+            glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT);
+            break;
+        case Renderer::ModVol::Or:
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_GREATER);
+            glDepthMask(GL_FALSE);
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            glDisable(GL_BLEND);
+            glStencilMask(2);
+            glStencilFunc(GL_ALWAYS, 2, 2);
+            glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+            break;
+        case Renderer::ModVol::Inclusion:
+            glDisable(GL_DEPTH_TEST);
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            glDisable(GL_BLEND);
+            glStencilMask(3);
+            glStencilFunc(GL_LEQUAL, 1, 3);
+            glStencilOp(GL_ZERO, GL_ZERO, GL_REPLACE);
+            break;
+        case Renderer::ModVol::Exclusion:
+            glDisable(GL_DEPTH_TEST);
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            glDisable(GL_BLEND);
+            glStencilMask(3);
+            glStencilFunc(GL_EQUAL, 1, 3);
+            glStencilOp(GL_ZERO, GL_ZERO, GL_KEEP);
+            break;
+        case Renderer::ModVol::Final:
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_CULL_FACE);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glStencilMask(3);
+            glStencilFunc(GL_EQUAL, 0x81, 0x81);
+            glStencilOp(GL_ZERO, GL_ZERO, GL_ZERO);
+            break;
+    }
+}
+
+void Renderer::draw_modifier_volumes(const Frame& frame, const FrameGeometry& geometry,
+                                     const float depth_params[3]) {
     if (frame.modifiers.empty())
         return;
     modvol_tris_.clear();
@@ -730,7 +702,7 @@ void Renderer::draw_modifier_volumes(const Frame& frame, const FrameGeometry& ge
 
     glBindVertexArray(modvol_vao_);
     glBindBuffer(GL_ARRAY_BUFFER, buf.gl_buffer());
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (const void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<const void*>(0));
     glEnableVertexAttribArray(0);
 
     glUseProgram(prog_modvol_);
@@ -739,14 +711,9 @@ void Renderer::draw_modifier_volumes(const Frame& frame, const FrameGeometry& ge
                           -1.0f - 2.0f * geometry.top / geometry.height};
     if (u_mv_scale_ >= 0) glUniform2fv(u_mv_scale_, 1, sc);
     if (u_mv_offset_ >= 0) glUniform2fv(u_mv_offset_, 1, off);
+    if (u_mv_depth_ >= 0) glUniform3fv(u_mv_depth_, 1, depth_params);
 
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_GREATER);
-    glDepthMask(GL_FALSE);
-    glDisable(GL_BLEND);
-    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     glEnable(GL_STENCIL_TEST);
-    glStencilMask(0xFF);
 
     std::size_t base = SIZE_MAX;
     for (std::size_t first = 0; first < tris;) {
@@ -760,49 +727,72 @@ void Renderer::draw_modifier_volumes(const Frame& frame, const FrameGeometry& ge
         if (base == SIZE_MAX)
             base = first;
 
-        apply_pvr_cull_mode(static_cast<std::uint8_t>(cull));
-
-        if (!volume_last && mv_mode > 0) {
-            glStencilFunc(GL_ALWAYS, 1, 0xFF);
-            glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-        } else {
-            glStencilFunc(GL_ALWAYS, 0, 0xFF);
-            glStencilOp(GL_KEEP, GL_KEEP, GL_INVERT);
-        }
+        set_modvol_stencil_state(!volume_last && mv_mode > 0 ? ModVol::Or : ModVol::Xor, cull);
         glDrawArrays(GL_TRIANGLES, static_cast<GLint>(first * 3), static_cast<GLsizei>((end - first) * 3));
 
         if (mv_mode == 1 || mv_mode == 2) {
-            if (mv_mode == 1) {
-                glStencilFunc(GL_ALWAYS, 0, 0xFF);
-                glStencilOp(GL_KEEP, GL_KEEP, GL_INCR_WRAP);
-            } else {
-                glStencilFunc(GL_ALWAYS, 0, 0xFF);
-                glStencilOp(GL_KEEP, GL_KEEP, GL_DECR_WRAP);
-            }
+            set_modvol_stencil_state(mv_mode == 1 ? ModVol::Inclusion : ModVol::Exclusion, cull);
             glDrawArrays(GL_TRIANGLES, static_cast<GLint>(base * 3), static_cast<GLsizei>((end - base) * 3));
             base = SIZE_MAX;
         }
         first = end;
     }
 
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_CULL_FACE);
-    glDepthFunc(GL_ALWAYS);
-    glStencilFunc(GL_NOTEQUAL, 0, 0xFF);
-    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    set_modvol_stencil_state(ModVol::Final, 0);
     if (u_mv_alpha_ >= 0) glUniform1f(u_mv_alpha_, 1.0f - geometry.shadow_scale);
     glDrawArrays(GL_TRIANGLES, static_cast<GLint>(tris * 3), 6);
 
+    glStencilMask(0xFF);
     glDisable(GL_STENCIL_TEST);
     glDisable(GL_BLEND);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+}
+
+constexpr float kMinMaxInvW = 1.0f;
+constexpr float kAbsMaxInvW = 131072.0f;
+constexpr float kDepthHeadroom = 1.01f;
+
+float compute_frame_max_z(const Frame& frame) {
+    float max_z = 0.0f;
+    auto track_z = [&](float z) {
+        if (!std::isnan(z) && z > max_z)
+            max_z = std::min(z, kAbsMaxInvW);
+    };
+
+    for (const Vertex& v : frame.vertices) {
+        track_z(v.z);
+    }
+    for (const LineEdge& le : frame.line_edges) {
+        track_z(le.za);
+        track_z(le.zb);
+    }
+    for (const ModifierTriangle& t : frame.modifiers) {
+        if (!t.translucent) {
+            track_z(t.z[0]);
+            track_z(t.z[1]);
+            track_z(t.z[2]);
+        }
+    }
+    return max_z;
 }
 
 void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& geometry,
                     VkExtent2D target) {
     if (frame.vertices.empty() && frame.line_edges.empty())
         return;
+
+    const float frame_max_z = compute_frame_max_z(frame);
+    const float max_inv_w = std::min(kAbsMaxInvW, std::max(kMinMaxInvW, frame_max_z) * kDepthHeadroom);
+    float depth_params[3];
+    if (ctx_->caps().zero_to_one_depth) {
+        depth_params[0] = 0.99f / max_inv_w;
+        depth_params[1] = 0.0f;
+        depth_params[2] = max_inv_w;
+    } else {
+        depth_params[0] = 1.98f / max_inv_w;
+        depth_params[1] = -1.0f;
+        depth_params[2] = max_inv_w;
+    }
 
     bool table_fog = false;
     for (const auto& list : frame.lists) {
@@ -947,14 +937,10 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
     pairs.clear();
 
     const bool per_triangle = geometry.autosort;
-    const bool split_translucent_strips =
-        geometry.autosort &&
-        frame.lists[static_cast<unsigned>(ListType::Translucent)].size() <= kMaxPerTriangleTranslucentStrips;
     std::size_t indices = 0;
 
     const auto add_translucent = [&](const Item& item, const Box& bb) {
-        const std::uint32_t dkey = depth_key(item.depth);
-        pairs.push_back((static_cast<std::uint64_t>(dkey) << 32) | translucent.size());
+        pairs.push_back((static_cast<std::uint64_t>(depth_key(item.depth)) << 32) | translucent.size());
         translucent.push_back({item, bb});
     };
 
@@ -1008,7 +994,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                 continue;
             }
             const bool is_additive = even < t_states.size() && t_states[even].additive;
-            if (blended && split_translucent_strips && !is_additive && p.count > 4) {
+            if (blended && geometry.autosort && !is_additive && p.count > 3) {
                 for (std::uint32_t i = 0; i + 2 < p.count; ++i) {
                     const Vertex& a = frame.vertices[p.first + i];
                     const Vertex& b = frame.vertices[p.first + i + 1];
@@ -1238,7 +1224,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
     for (const auto& cmd : cmds) {
         if (cmd.type == CmdType::ModifierVolume) {
             if (!frame.modifiers.empty()) {
-                draw_modifier_volumes(frame, geometry);
+                draw_modifier_volumes(frame, geometry, depth_params);
                 active_prog = 0;
                 active_vao = 0;
                 active_state_bits = ~0u;
@@ -1266,6 +1252,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
             if (u.u_tex >= 0) glUniform1i(u.u_tex, 0);
             if (u.u_scale >= 0) glUniform2fv(u.u_scale, 1, push.scale);
             if (u.u_offset >= 0) glUniform2fv(u.u_offset, 1, push.offset);
+            if (u.u_depth >= 0) glUniform3fv(u.u_depth, 1, depth_params);
             if (u.u_alpha_ref >= 0) glUniform1f(u.u_alpha_ref, geometry.alpha_ref);
             if (u.u_fog_vert >= 0) glUniform4fv(u.u_fog_vert, 1, push.fog_vert);
             if (u.u_fog_ram >= 0) glUniform4fv(u.u_fog_ram, 1, push.fog_ram);
@@ -1285,6 +1272,17 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
             }
         }
 
+        auto apply_geom_stencil_state = [](const PipelineKey& k) {
+            if (k.blend) {
+                glDisable(GL_STENCIL_TEST);
+            } else {
+                glEnable(GL_STENCIL_TEST);
+                glStencilMask(0x80);
+                glStencilFunc(GL_ALWAYS, k.shadow ? 0x80 : 0x00, 0x00);
+                glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+            }
+        };
+
         const std::uint32_t new_state_bits = st.key & kGlPipelineStateMask;
         if (new_state_bits != active_state_bits) {
             if (active_state_bits == ~0u) {
@@ -1299,13 +1297,7 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                 } else {
                     glDisable(GL_BLEND);
                 }
-                if (key.shadow) {
-                    glEnable(GL_STENCIL_TEST);
-                    glStencilFunc(GL_EQUAL, 0, 0xFF);
-                    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-                } else {
-                    glDisable(GL_STENCIL_TEST);
-                }
+                apply_geom_stencil_state(key);
             } else {
                 const PipelineKey prev = key_from_bits(active_state_bits);
                 if (prev.depth_mode != key.depth_mode)
@@ -1326,14 +1318,8 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                     glBlendFuncSeparate(src_factor(key.src_blend), dst_factor(key.dst_blend),
                                         src_factor(key.src_blend), dst_factor(key.dst_blend));
                 }
-                if (prev.shadow != key.shadow) {
-                    if (key.shadow) {
-                        glEnable(GL_STENCIL_TEST);
-                        glStencilFunc(GL_EQUAL, 0, 0xFF);
-                        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-                    } else {
-                        glDisable(GL_STENCIL_TEST);
-                    }
+                if (prev.blend != key.blend || (!key.blend && prev.shadow != key.shadow)) {
+                    apply_geom_stencil_state(key);
                 }
             }
             active_state_bits = new_state_bits;
@@ -1368,6 +1354,8 @@ void Renderer::draw(VkCommandBuffer, const Frame& frame, const FrameGeometry& ge
                        reinterpret_cast<const void*>(static_cast<std::uintptr_t>(cmd.first) * sizeof(std::uint32_t)));
     }
 
+    glStencilMask(0xFF);
+    glDisable(GL_STENCIL_TEST);
     glBindVertexArray(0);
 }
 

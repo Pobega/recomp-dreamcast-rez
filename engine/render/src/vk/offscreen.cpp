@@ -28,7 +28,7 @@ bool Offscreen::create(Context& ctx, std::uint32_t width, std::uint32_t height) 
 
     glGenRenderbuffers(1, &depth_rb_);
     glBindRenderbuffer(GL_RENDERBUFFER, depth_rb_);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, static_cast<GLsizei>(width),
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH32F_STENCIL8, static_cast<GLsizei>(width),
                           static_cast<GLsizei>(height));
 
     glGenFramebuffers(1, &fbo_);
@@ -109,11 +109,6 @@ bool Offscreen::copy_to_host() {
                  GL_RGBA, GL_UNSIGNED_BYTE, pixel_buf_.data());
     glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(prev_read_fbo));
 
-    for (std::uint32_t y = 0; y < extent_.height / 2; ++y) {
-        std::uint32_t* top = pixel_buf_.data() + y * extent_.width;
-        std::uint32_t* bot = pixel_buf_.data() + (extent_.height - 1 - y) * extent_.width;
-        std::swap_ranges(top, top + extent_.width, bot);
-    }
     have_pixels_ = true;
     return true;
 }
