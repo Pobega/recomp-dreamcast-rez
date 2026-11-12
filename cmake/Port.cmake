@@ -10,8 +10,9 @@ function(dreamcomp_add_port id)
   endif()
   # The same floating point as the engine, for every target made in the calling directory from
   # here on, the generated code included.
-  add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-ffp-contract=off>
-                      $<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:-ffp-contract=off>)
+  add_compile_options(
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:$<IF:$<BOOL:${DREAM_STRICT_FP}>,-ffp-contract=off,-ffp-contract=fast>>
+    $<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:$<IF:$<BOOL:${DREAM_STRICT_FP}>,-ffp-contract=off,-ffp-contract=fast>>)
   dream_add_game(${id} TITLE "${ARG_TITLE}")
   if(NOT TARGET ${id}_boot)
     message(STATUS "${ARG_TITLE}: no extracted boot executable yet; run "

@@ -572,11 +572,15 @@ inline void fsca(Ctx& c, unsigned n) noexcept {
 inline void fipr(Ctx& c, unsigned m, unsigned n) noexcept {
     const float* a = &c.fr[n];
     const float* b = &c.fr[m];
+#if defined(DREAM_STRICT_FP)
     double d = static_cast<double>(a[0]) * b[0];
     d += static_cast<double>(a[1]) * b[1];
     d += static_cast<double>(a[2]) * b[2];
     d += static_cast<double>(a[3]) * b[3];
     c.fr[n + 3] = static_cast<float>(d);
+#else
+    c.fr[n + 3] = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+#endif
 }
 
 // FTRV XMTRX,FVn: FV[n] = XMTRX * FV[n], XMTRX being the back bank as a 4x4 column-major matrix.
@@ -585,6 +589,7 @@ inline void ftrv(Ctx& c, unsigned n) noexcept {
     const float* v = &c.fr[n];
     const float x = v[0], y = v[1], z = v[2], w = v[3];
     const float* xm = c.xf;
+#if defined(DREAM_STRICT_FP)
     // Each row before any is written back (FV[n] is the input); no local array (see ftrv_x).
     const double r0 = static_cast<double>(xm[0]) * x + static_cast<double>(xm[4]) * y +
                       static_cast<double>(xm[8]) * z + static_cast<double>(xm[12]) * w;
@@ -598,6 +603,16 @@ inline void ftrv(Ctx& c, unsigned n) noexcept {
     c.fr[n + 1] = static_cast<float>(r1);
     c.fr[n + 2] = static_cast<float>(r2);
     c.fr[n + 3] = static_cast<float>(r3);
+#else
+    const float r0 = xm[0] * x + xm[4] * y + xm[8] * z + xm[12] * w;
+    const float r1 = xm[1] * x + xm[5] * y + xm[9] * z + xm[13] * w;
+    const float r2 = xm[2] * x + xm[6] * y + xm[10] * z + xm[14] * w;
+    const float r3 = xm[3] * x + xm[7] * y + xm[11] * z + xm[15] * w;
+    c.fr[n] = r0;
+    c.fr[n + 1] = r1;
+    c.fr[n + 2] = r2;
+    c.fr[n + 3] = r3;
+#endif
 }
 
 // The same operations on front-bank registers held in locals: emitted code keeps FR0..FR15 in local
@@ -623,11 +638,15 @@ inline std::uint64_t pair_of(float hi, float lo) noexcept {
 }
 inline float fipr_of(float a0, float a1, float a2, float a3, float b0, float b1, float b2,
                      float b3) noexcept {
+#if defined(DREAM_STRICT_FP)
     double d = static_cast<double>(a0) * b0;
     d += static_cast<double>(a1) * b1;
     d += static_cast<double>(a2) * b2;
     d += static_cast<double>(a3) * b3;
     return static_cast<float>(d);
+#else
+    return a0 * b0 + a1 * b1 + a2 * b2 + a3 * b3;
+#endif
 }
 // FTRV with XMTRX from locals too (x0..x15 are XF0..XF15), so the matrix can stay in registers
 // across a loop of transforms. Written out row by row, not as a loop over arrays, which at low
@@ -636,6 +655,7 @@ inline void ftrv_x(float x0, float x1, float x2, float x3, float x4, float x5, f
                    float x8, float x9, float x10, float x11, float x12, float x13, float x14,
                    float x15, float& v0, float& v1, float& v2, float& v3) noexcept {
     const float x = v0, y = v1, z = v2, w = v3;
+#if defined(DREAM_STRICT_FP)
     const double r0 = static_cast<double>(x0) * x + static_cast<double>(x4) * y +
                       static_cast<double>(x8) * z + static_cast<double>(x12) * w;
     const double r1 = static_cast<double>(x1) * x + static_cast<double>(x5) * y +
@@ -648,6 +668,16 @@ inline void ftrv_x(float x0, float x1, float x2, float x3, float x4, float x5, f
     v1 = static_cast<float>(r1);
     v2 = static_cast<float>(r2);
     v3 = static_cast<float>(r3);
+#else
+    const float r0 = x0 * x + x4 * y + x8 * z + x12 * w;
+    const float r1 = x1 * x + x5 * y + x9 * z + x13 * w;
+    const float r2 = x2 * x + x6 * y + x10 * z + x14 * w;
+    const float r3 = x3 * x + x7 * y + x11 * z + x15 * w;
+    v0 = r0;
+    v1 = r1;
+    v2 = r2;
+    v3 = r3;
+#endif
 }
 inline void fsca_set(const Ctx& c, float& s, float& co) noexcept {
     const std::uint32_t i = c.fpul & 0xFFFFu;

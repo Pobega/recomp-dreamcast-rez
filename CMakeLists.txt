@@ -15,8 +15,10 @@ elseif(_dc_threads GREATER 64)
 endif()
 set(DREAM_GEN_SHARDS ${_dc_threads} CACHE STRING "Parts the generated game code is split into")
 
-set(DREAMCOMP_FP_OPTIONS $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-ffp-contract=off>
-                         $<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:-ffp-contract=off>)
+option(DREAM_STRICT_FP "Enforce strict cross-host floating-point rounding and disable FMA" ON)
+set(DREAMCOMP_FP_OPTIONS
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:$<IF:$<BOOL:${DREAM_STRICT_FP}>,-ffp-contract=off,-ffp-contract=fast>>
+    $<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:$<IF:$<BOOL:${DREAM_STRICT_FP}>,-ffp-contract=off,-ffp-contract=fast>>)
 add_compile_options(${DREAMCOMP_FP_OPTIONS})
 add_subdirectory(engine)
 include(cmake/Port.cmake)
