@@ -61,7 +61,7 @@ const dreamcomp::PortInfo kInfo = [] {
         // a scene depth. So only the depth threshold decides; the shared-depth test is off, as it
         // would take the horizon for HUD.
         p.hud.enabled = true;
-        p.hud.polygons = true;
+        p.hud.polygons = false;
         p.hud.backdrop_cover = 0.9f;
         p.hud.overlay_z = 2.0f;
         p.hud.min_shared = 1u << 30;
