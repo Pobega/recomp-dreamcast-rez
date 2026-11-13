@@ -74,6 +74,8 @@ struct PortInfo {
         // a backdrop (tiled full-screen art),
         // not HUD; it is left to fill the widened picture (dreamcomp).
         float backdrop_cover = 0.6f;
+        // When true, flat sprites and polygons at overlay_z whose 1/w has bit 0 set are forced to Anchor::Center.
+        bool honor_center_tag = false;
     };
     HudRule hud;
 

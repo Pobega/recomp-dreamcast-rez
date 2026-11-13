@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
@@ -190,6 +191,14 @@ void add_tcw(std::vector<std::uint32_t>& v, std::uint32_t t) {
         v.push_back(t);
 }
 
+constexpr int kCenterTaggedGroup = -2;
+
+bool is_center_tagged(float z) noexcept {
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &z, sizeof(bits));
+    return (bits & 1u) != 0;
+}
+
 }  // namespace
 
 void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float aspect, bool edges,
@@ -309,6 +318,12 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
                 items.push_back({&p, x0, x1, y0, y1, a, m});
                 continue;
             }
+            const std::uint32_t poly_type = type_of(p);
+            if (rule.honor_center_tag && !p.line_batch && (poly_type == 5u || poly_type == 4u) &&
+                z >= rule.overlay_z && (x1 - x0) <= rule.full_width && is_center_tagged(z)) {
+                items.push_back({&p, x0, x1, y0, y1, Anchor::Center, kCenterTaggedGroup});
+                continue;
+            }
             bool hud = eligible(p);
             if (hud && z < rule.overlay_z && counts[z] < rule.min_shared)
                 hud = false;
@@ -379,6 +394,8 @@ void correct(dream::render::Frame& frame, const PortInfo::HudRule& rule, float a
         gy1[r] = std::max(gy1[r], items[i].y1);
         if (items[i].override_index >= 0 && goverride[r] < 0) {
             goverride[r] = items[i].override_index;
+            gforced[r] = items[i].forced;
+        } else if (items[i].forced != Anchor::Auto && gforced[r] == Anchor::Auto) {
             gforced[r] = items[i].forced;
         }
     }

@@ -4,6 +4,7 @@
 #include <cstdint>
 
 namespace dream {
+class Memory;
 class System;
 namespace mem {
 class MmioHandler;
@@ -24,5 +25,9 @@ std::uint64_t native_gfx_frame_swaps();
 // What a device register access does on the way, for hooks that replace one: the scheduler is
 // brought up to the guest clock.
 void device_access();
+
+// UI tagging range hooks: tag UI primitives at overlay_z with bit 0 of 1/w for uniform centering.
+void native_gfx_ui_tag_begin(dream::Memory& m);
+void native_gfx_ui_tag_end(dream::Memory& m);
 
 }  // namespace rez

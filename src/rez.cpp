@@ -65,6 +65,7 @@ const dreamcomp::PortInfo kInfo = [] {
         p.hud.backdrop_cover = 0.9f;
         p.hud.overlay_z = 2.0f;
         p.hud.min_shared = 1u << 30;
+        p.hud.honor_center_tag = true;
     }
     // The sound up to the stop, while the System is still alive.
     p.on_stop = [](dream::System&, dreamcomp::Settings&) { rez::native_sound_stop(); };

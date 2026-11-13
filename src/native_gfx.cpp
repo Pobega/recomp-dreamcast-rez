@@ -46,6 +46,23 @@ std::uint32_t g_render_ctx = 0;  // the context Kamui's render start was called 
 int g_render_event = -1;
 std::uint64_t g_frame_swaps = 0;  // FB_R_SOF1 writes: pictures the game has shown
 
+constexpr std::uint32_t kKamuiVertexBufDescPtr = 0x8C121050u;
+constexpr float kUiOverlayMinDepth = 2.0f;
+constexpr std::uint32_t kMainRamBytes = 0x01000000u;
+constexpr std::uint32_t kMaxUiTagBytes = 0x00100000u;
+constexpr std::uint32_t kTaChunkBytes = 32u;
+constexpr std::uint32_t kTaDoubleChunkBytes = 64u;
+constexpr std::uint32_t kColorFloating = 1u;
+constexpr std::uint32_t kColorIntensity = 2u;
+constexpr std::uint32_t kParaEndOfList = 0u;
+constexpr std::uint32_t kParaPolygonOrModVol = 4u;
+constexpr std::uint32_t kParaSprite = 5u;
+constexpr std::uint32_t kParaExternal = 6u;
+constexpr std::uint32_t kParaVertex = 7u;
+
+int g_ui_tag_depth = 0;
+bool g_ui_tag_valid = false;
+std::array<std::uint32_t, 5> g_ui_tag_before{};
 
 bool spg_reg(std::uint32_t off) {
     const std::uint32_t addr = Core::kRegBase + off;
@@ -82,6 +99,8 @@ void settings_write(std::uint32_t off, std::uint32_t value) {
             start_render();
             return;
         case Core::kTaListInit:  // the context's lists start again; the TA's pointers reset
+            g_ui_tag_depth = 0;
+            g_ui_tag_valid = false;
             if (value >> 31) {
                 g_streams[g_list_ctx].clear();
                 g_regs[Core::kTaNextOpb >> 2] = g_regs[Core::kTaNextOpbInit >> 2];
@@ -306,6 +325,172 @@ bool km_render_start(dream::sh4::Ctx& c) {
     return false;
 }
 
+std::uint32_t* map_ta_chunk(dream::Memory& m, std::uint32_t addr) noexcept {
+    if (dream::Memory::is_sq(addr)) {
+        const unsigned bank = (addr >> 5) & 1u;
+        if (!m.sq_ram || !m.sq_to_ram[bank])
+            return nullptr;
+        const std::uint32_t ram_off = (m.sq_area[bank] | (addr & 0x03FFFFE0u)) & 0x00FFFFFFu;
+        if (ram_off + kTaChunkBytes > kMainRamBytes)
+            return nullptr;
+        return reinterpret_cast<std::uint32_t*>(m.sq_ram + ram_off);
+    }
+    if (dream::Memory::is_ram(addr) && m.fast_ram) {
+        const std::uint32_t ram_off = addr & 0x00FFFFE0u;
+        if (ram_off + kTaChunkBytes > kMainRamBytes)
+            return nullptr;
+        return reinterpret_cast<std::uint32_t*>(m.fast_ram + ram_off);
+    }
+    return nullptr;
+}
+
+void walk_and_tag_range(dream::Memory& m, std::uint32_t before, std::uint32_t after) {
+    bool in_sprite = false;
+    bool header_active = false;
+    std::uint32_t cur_pcw = 0;
+    std::uint32_t line_words_remaining = 0;
+
+    auto u2f = [](std::uint32_t u) noexcept -> float {
+        float f;
+        std::memcpy(&f, &u, sizeof(f));
+        return f;
+    };
+
+    auto pcw_para_type = [](std::uint32_t p) noexcept -> std::uint32_t { return (p >> 29) & 7u; };
+    auto pcw_volume = [](std::uint32_t p) noexcept -> std::uint32_t { return (p >> 6) & 1u; };
+    auto pcw_col_type = [](std::uint32_t p) noexcept -> std::uint32_t { return (p >> 4) & 3u; };
+    auto pcw_texture = [](std::uint32_t p) noexcept -> std::uint32_t { return (p >> 3) & 1u; };
+    auto pcw_offset = [](std::uint32_t p) noexcept -> std::uint32_t { return (p >> 2) & 1u; };
+
+    auto header_is_64 = [&](std::uint32_t pcw) noexcept -> bool {
+        if (pcw_col_type(pcw) != kColorIntensity)
+            return false;
+        if (pcw_volume(pcw))
+            return true;
+        return pcw_texture(pcw) != 0 && pcw_offset(pcw) != 0;
+    };
+
+    auto vertex_is_64 = [&](std::uint32_t pcw) noexcept -> bool {
+        const std::uint32_t col = pcw_col_type(pcw);
+        if (pcw_volume(pcw))
+            return pcw_texture(pcw) != 0;
+        if (!pcw_texture(pcw))
+            return false;
+        return col == kColorFloating;
+    };
+
+    for (std::uint32_t addr = before; addr < after;) {
+        std::uint32_t* const w = map_ta_chunk(m, addr);
+        if (!w) {
+            addr += kTaChunkBytes;
+            continue;
+        }
+
+        if (line_words_remaining != 0) {
+            line_words_remaining = (line_words_remaining <= 8u) ? 0u : (line_words_remaining - 8u);
+            addr += kTaChunkBytes;
+            continue;
+        }
+
+        const std::uint32_t pcw = w[0];
+        const std::uint32_t para_type = pcw_para_type(pcw);
+
+        switch (para_type) {
+            case kParaSprite:
+                in_sprite = true;
+                header_active = true;
+                cur_pcw = pcw;
+                addr += kTaChunkBytes;
+                break;
+            case kParaPolygonOrModVol: {
+                in_sprite = false;
+                header_active = true;
+                cur_pcw = pcw;
+                const bool is_64 = header_is_64(pcw);
+                addr += is_64 ? kTaDoubleChunkBytes : kTaChunkBytes;
+                break;
+            }
+            case kParaExternal: {
+                const std::uint32_t count = w[1];
+                line_words_remaining = 6u * count;
+                addr += kTaChunkBytes;
+                break;
+            }
+            case kParaVertex: {
+                if (in_sprite) {
+                    if (addr + kTaDoubleChunkBytes <= after) {
+                        std::uint32_t* const w2 = map_ta_chunk(m, addr + kTaChunkBytes);
+                        if (w2) {
+                            const std::uint32_t az = w[3];
+                            const std::uint32_t bz = w[6];
+                            const std::uint32_t cz = w2[1];
+                            if (az == bz && az == cz && u2f(az) >= kUiOverlayMinDepth) {
+                                w[3] |= 1u;
+                                w[6] |= 1u;
+                                w2[1] |= 1u;
+                            }
+                        }
+                    }
+                    addr += kTaDoubleChunkBytes;
+                    break;
+                }
+                if (header_active) {
+                    if (u2f(w[3]) >= kUiOverlayMinDepth) {
+                        w[3] |= 1u;
+                    }
+                    const bool is_64 = vertex_is_64(cur_pcw);
+                    addr += is_64 ? kTaDoubleChunkBytes : kTaChunkBytes;
+                    break;
+                }
+                addr += kTaChunkBytes;
+                break;
+            }
+            case kParaEndOfList:
+                header_active = false;
+                in_sprite = false;
+                addr += kTaChunkBytes;
+                break;
+            default:
+                addr += kTaChunkBytes;
+                break;
+        }
+    }
+}
+
+void native_gfx_ui_tag_begin(dream::Memory& m) {
+    if (g_ui_tag_depth++ == 0) {
+        g_ui_tag_valid = false;
+        const std::uint32_t desc = m.read32(kKamuiVertexBufDescPtr);
+        if (dream::Memory::is_ram(desc)) {
+            for (unsigned list = 0; list < 5; ++list) {
+                g_ui_tag_before[list] = m.read32(desc + 4u * list);
+            }
+            g_ui_tag_valid = true;
+        }
+    }
+}
+
+void native_gfx_ui_tag_end(dream::Memory& m) {
+    if (g_ui_tag_depth <= 0)
+        return;
+    if (--g_ui_tag_depth != 0)
+        return;
+    if (!g_ui_tag_valid)
+        return;
+    g_ui_tag_valid = false;
+    const std::uint32_t desc = m.read32(kKamuiVertexBufDescPtr);
+    if (!dream::Memory::is_ram(desc))
+        return;
+
+    for (const unsigned list : {0u, 2u, 4u}) {
+        const std::uint32_t before = g_ui_tag_before[list];
+        const std::uint32_t after = m.read32(desc + 4u * list);
+        if (after <= before || ((after - before) & (kTaChunkBytes - 1u)) != 0 || (after - before) > kMaxUiTagBytes)
+            continue;
+        walk_and_tag_range(m, before, after);
+    }
+}
+
 }  // namespace rez
 
 DC_HOOK_ENTRY(km_send_buffer) {
@@ -330,4 +515,44 @@ DC_HOOK_ENTRY(km_begin_scene) {
 DC_HOOK_ENTRY(km_render_start) {
     (void)m;
     return rez::km_render_start(c);
+}
+
+DC_HOOK_ENTRY(ui_tag_stage_pause) {
+    (void)c;
+    rez::native_gfx_ui_tag_begin(m);
+    return false;
+}
+DC_HOOK_EXIT(ui_tag_stage_pause) {
+    (void)c;
+    rez::native_gfx_ui_tag_end(m);
+}
+
+DC_HOOK_ENTRY(ui_tag_modal_dialog) {
+    (void)c;
+    rez::native_gfx_ui_tag_begin(m);
+    return false;
+}
+DC_HOOK_EXIT(ui_tag_modal_dialog) {
+    (void)c;
+    rez::native_gfx_ui_tag_end(m);
+}
+
+DC_HOOK_ENTRY(ui_tag_title_menu) {
+    (void)c;
+    rez::native_gfx_ui_tag_begin(m);
+    return false;
+}
+DC_HOOK_EXIT(ui_tag_title_menu) {
+    (void)c;
+    rez::native_gfx_ui_tag_end(m);
+}
+
+DC_HOOK_ENTRY(ui_tag_options_menu) {
+    (void)c;
+    rez::native_gfx_ui_tag_begin(m);
+    return false;
+}
+DC_HOOK_EXIT(ui_tag_options_menu) {
+    (void)c;
+    rez::native_gfx_ui_tag_end(m);
 }

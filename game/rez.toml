@@ -243,11 +243,11 @@ overlay = true
 file = "extracted/fs/TITLE/TITLE.BIN"
 dest = 0x8C300000
 # 0x8C302D34: a function after a literal pool
-entries = [0x8C302E56, 0x8C302D34]
+entries = [0x8C302E56, 0x8C302D34, 0x8C302DEC, 0x8C300D3C]
 overlay = true
 # "exit" and "recomp settings" in the main menu (src/title_exit.cpp, src/recomp_settings.cpp): the
 # menu's input and drawing, and the options screen's set 0 getter and setter.
-hooks = { "0x8C3026C4" = "title_menu_input", "0x8C302876" = "title_menu_draw", "0x8C301464" = "recomp_get@entry", "0x8C30146A" = "recomp_set@entry" }
+hooks = { "0x8C3026C4" = "title_menu_input", "0x8C302876" = "title_menu_draw", "0x8C301464" = "recomp_get@entry", "0x8C30146A" = "recomp_set@entry", "0x8C302DEC" = "ui_tag_title_menu", "0x8C300D3C" = "ui_tag_options_menu" }
 
 [functions]
 # Function starts the translator does not find on its own (reached through pointers or computed
@@ -318,6 +318,9 @@ extra = [# gdFs entry points Rez never calls (gdFsGetEof, gdFsSetTransMode, gdFs
          0x8C0D6BF8]
 
 [hooks]
+# Stage pause and modal yes/no dialog UI taggers (src/native_gfx.cpp).
+0x8C0B9A10 = "ui_tag_stage_pause"
+0x8C0D38C4 = "ui_tag_modal_dialog"
 # Kamui's vertex-buffer send (src/native_gfx.cpp).
 0x8C045120 = "km_send_buffer@entry"
 # Ninja2's chunk-model drawing, native (src/native_ninja.cpp): the vertex chunk handlers for types
