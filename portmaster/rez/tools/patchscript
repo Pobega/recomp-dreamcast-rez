@@ -45,7 +45,7 @@ log_msg "Found disc image: $(basename "$CHD_FILE")"
 
 log_msg "Verifying disc SHA-1 and extracting 1ST_READ.BIN..."
 if ! "$GAMEDIR/tools/rez-patch" --extract-verify "$CHD_FILE" "$GAMEDIR/extracted/fs/1ST_READ.BIN" 2>&1 | tee -a "$LOGFILE"; then
-  fail_patch "Unsupported or corrupted Rez .chd disc! Only the original Japanese (HDR-0192) and European (MK-5119250) Dreamcast releases are supported."
+  fail_patch "Unsupported or corrupted Rez .chd disc! Only the original Japanese (HDR-0178) and European (MK-5119250) Dreamcast releases are supported."
 fi
 
 if [ -f "$GAMEDIR/rez.patch" ]; then

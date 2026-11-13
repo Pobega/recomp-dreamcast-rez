@@ -19,7 +19,7 @@ namespace rez {
 namespace {
 
 dream::System* g_sys = nullptr;
-unsigned g_frame_rate = 60;
+unsigned g_frame_rate = 30;
 std::uint64_t g_last = 0, g_pass = 0;
 
 }  // namespace
