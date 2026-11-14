@@ -2,7 +2,7 @@
 
 A static C++ recompilation of **Rez** (Sega Dreamcast, 2001) tailored for **PortMaster** Linux handhelds (`aarch64`) and Linux desktop (`x86_64`).
 
-Forked from [phobos665/recomp-dreamcast-rez](https://github.com/phobos665/recomp-dreamcast-rez), this port replaces the desktop Vulkan renderer with a lightweight **OpenGL ES 3.0** rendering pipeline, adds multi-aspect handheld display ladders, and integrates PortMaster's first-boot disc verification and patching workflow.
+Forked from [tyrannotorus/recomp-dreamcast-rez](https://github.com/tyrannotorus/recomp-dreamcast-rez), this port replaces the desktop Vulkan renderer with a lightweight **OpenGL ES 3.0** rendering pipeline, adds multi-aspect handheld display ladders, and integrates PortMaster's first-boot disc verification and patching workflow.
 
 ## Screenshots
 
@@ -66,8 +66,9 @@ See [BUILDING.md](BUILDING.md) for instructions on setting up the `aarch64` sysr
 
 ## Credits
 
-- [**phobos665 / dream-recomp**](https://github.com/phobos665/recomp-dreamcast-rez) — Original Rez static recompilation and `dream-recomp` engine
-- [**dreamcomp**](https://github.com/cherryduck/dreamcomp) — Dreamcast recompilation research and foundation
+- [**tyrannotorus / recomp-dreamcast-rez**](https://github.com/tyrannotorus/recomp-dreamcast-rez) — Original Rez static recompilation
+- [**phobos665 / dream-recomp**](https://github.com/phobos665/dream-recomp) — `dream-recomp` SH-4 static recompilation engine
+- [**cherryduck / dreamcomp**](https://github.com/cherryduck/dreamcomp) — Dreamcast recompilation research and foundation
 - [**flycast**](https://github.com/flyinghead/flycast) — Dreamcast hardware and Holly/AICA reference
 
 ## License

@@ -1,6 +1,6 @@
 ## Notes
 
-Thanks to United Game Artists for creating Rez and [phobos665](https://github.com/phobos665/recomp-dreamcast-rez) for the Dreamcast static recompilation and `dream-recomp` engine, delivering synesthetic wireframe rail-shooting where every lock-on and shot builds the electronic soundtrack across five evolving cybernetic layers.
+Thanks to United Game Artists for creating Rez and [tyrannotorus](https://github.com/tyrannotorus/recomp-dreamcast-rez) for the Dreamcast static recompilation (built on [phobos665's dream-recomp](https://github.com/phobos665/dream-recomp) and [cherryduck's dreamcomp](https://github.com/cherryduck/dreamcomp)), delivering synesthetic wireframe rail-shooting where every lock-on and shot builds the electronic soundtrack across five evolving cybernetic layers.
 
 To run Rez, convert your original Japanese (`HDR-0178`, CHD SHA-1 `9711a0d0c21af3685672b9a42c72abf999fc7150`) or European (`MK-5119250`, CHD SHA-1 `01b7c1cc29a840b141a4ae713037eb1224fac233`) Dreamcast Rez V1.003 disc to `.chd` (for example with `chdman createcd`) and place it in `ports/rez/gamedata/`. First launch verifies the disc and reconstructs `rez.aarch64` in about 15 seconds.
 
