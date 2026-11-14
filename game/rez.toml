@@ -9,7 +9,7 @@ product = "HDR-0178"
 [disc]
 sha1_1st_read = "62f27393c3170001dc987f3ae836461bd63dbd7a"   # SHA-1 of the boot file
 
-# The supported disc images: Redump's CHDs of the Japanese and European releases, by the SHA-1 each
+# The supported disc images: CHDs of the Japanese and European releases, by the SHA-1 each
 # CHD's header records. Both carry the boot file above; the European one differs only in data the
 # game reads at run time. dc.py setup and the game refuse any other image, including a GDI or
 # BIN/CUE of the same disc.

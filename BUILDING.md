@@ -40,4 +40,4 @@ Rez Recompiled targets Linux handhelds running PortMaster (`aarch64`). It cross-
 
 ## How Disc-Keyed Packaging Works
 
-`tools/package.sh` transforms the cross-compiled `build/target/game/rez-recomp` binary into `rez/rez.patch` using the SHA-256 of `1ST_READ.BIN` extracted from the builder's `.chd` disc. No raw executable is distributed inside `build/rez.zip`. On the player's handheld, PortMaster's first-boot patcher invokes `rez/tools/patchscript` and `rez/tools/rez-patch` against the player's own `.chd` disc to verify ownership and reconstruct `rez/rez`.
+`tools/package.sh` transforms the cross-compiled `build/target/game/rez-recomp` binary into `rez/rez.patch` using the SHA-256 of `1ST_READ.BIN` extracted from the builder's `.chd` disc. No raw executable is distributed inside `build/rez.zip`. On the player's handheld, PortMaster's first-boot patcher invokes `rez/tools/patchscript` and `rez/tools/rez-patch` against the player's own `.chd` disc to verify ownership and reconstruct `rez/rez.aarch64`.

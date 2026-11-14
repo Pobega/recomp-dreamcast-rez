@@ -19,8 +19,10 @@ fi
 [ -x "$HOST_PATCH" ] || { echo "package: host rez-patch build failed"; exit 2; }
 
 rm -rf "$PKG"
-mkdir -p "$PKG/rez/gamedata" "$PKG/rez/licenses" "$PKG/rez/tools"
+mkdir -p "$PKG/rez/conf/rez_recompiled" "$PKG/rez/gamedata" "$PKG/rez/libs.aarch64" "$PKG/rez/licenses" "$PKG/rez/tools"
+[ -f portmaster/rez/conf/rez_recompiled/.gitkeep ] && cp portmaster/rez/conf/rez_recompiled/.gitkeep "$PKG/rez/conf/rez_recompiled/.gitkeep"
 [ -f portmaster/rez/gamedata/.gitkeep ] && cp portmaster/rez/gamedata/.gitkeep "$PKG/rez/gamedata/.gitkeep"
+[ -f portmaster/rez/libs.aarch64/.gitkeep ] && cp portmaster/rez/libs.aarch64/.gitkeep "$PKG/rez/libs.aarch64/.gitkeep"
 
 cp portmaster/Rez.sh "$PKG/Rez.sh"
 chmod +x "$PKG/Rez.sh"
@@ -51,6 +53,7 @@ cp game/rez-pipelines.txt "$PKG/rez/rez-pipelines.txt"
 
 cp portmaster/rez/port.json "$PKG/rez/port.json"
 cp portmaster/rez/README.md "$PKG/rez/README.md"
+[ -f portmaster/rez/testing_thread.txt ] && cp portmaster/rez/testing_thread.txt "$PKG/rez/testing_thread.txt"
 [ -f portmaster/rez/gameinfo.xml ] && cp portmaster/rez/gameinfo.xml "$PKG/rez/gameinfo.xml"
 [ -f portmaster/rez/screenshot.png ] && cp portmaster/rez/screenshot.png "$PKG/rez/screenshot.png"
 

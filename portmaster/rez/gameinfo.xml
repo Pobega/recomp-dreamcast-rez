@@ -3,12 +3,11 @@
   <game>
     <path>./Rez.sh</path>
     <name>Rez</name>
-    <desc>A rail-shooter music video game developed by United Game Artists and released by Sega for the Dreamcast.</desc>
+    <desc>Hack into the Eden supercomputer network in United Game Artists' synesthetic wireframe rail-shooter, where every lock-on and shot builds the electronic soundtrack across five evolving cybernetic layers.</desc>
     <releasedate>20011122T000000</releasedate>
     <developer>United Game Artists</developer>
     <publisher>Sega</publisher>
-    <genre>Action, Arcade, Music</genre>
-    <players>1</players>
-    <image>./screenshot.png</image>
+    <genre>Action</genre>
+    <image>./rez/screenshot.png</image>
   </game>
 </gameList>

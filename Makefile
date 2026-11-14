@@ -1,7 +1,7 @@
 ADB ?= adb
 JOBS ?= 8
 
-# NextUI (PORTS.pak) SD card layout (TrimUI Brick / Smart Pro, RG35XXSP / H700, etc.)
+# NextUI (PORTS.pak) SD card layout (TrimUI Brick / Smart Pro, RGSP / H700, etc.)
 NEXTUI_PORTS_DIR ?= /mnt/SDCARD/Roms/Ports (PORTS)
 NEXTUI_DOTPORTS_DIR ?= $(NEXTUI_PORTS_DIR)/.ports
 NEXTUI_GAMEDIR ?= $(NEXTUI_DOTPORTS_DIR)/rez
@@ -33,7 +33,7 @@ push:
 	$(ADB) push "$(STAGE_DIR)/Rez.sh" "$(NEXTUI_PORTS_DIR)/Rez.sh"
 	$(ADB) push "$(STAGE_DIR)/Rez.sh" "$(NEXTUI_DOTPORTS_DIR)/Rez.sh"
 	@echo "==> Pushing release files to $(NEXTUI_GAMEDIR)/..."
-	$(ADB) shell 'mkdir -p "$(NEXTUI_GAMEDIR)/tools" "$(NEXTUI_GAMEDIR)/licenses" "$(NEXTUI_GAMEDIR)/gamedata"'
+	$(ADB) shell 'mkdir -p "$(NEXTUI_GAMEDIR)/tools" "$(NEXTUI_GAMEDIR)/licenses" "$(NEXTUI_GAMEDIR)/gamedata" "$(NEXTUI_GAMEDIR)/conf/rez_recompiled" "$(NEXTUI_GAMEDIR)/libs.aarch64"'
 	$(ADB) push \
 		"$(STAGE_DIR)/rez/README.md" \
 		"$(STAGE_DIR)/rez/gameinfo.xml" \
@@ -41,6 +41,7 @@ push:
 		"$(STAGE_DIR)/rez/rez.patch" \
 		"$(STAGE_DIR)/rez/rez.toml" \
 		"$(STAGE_DIR)/rez/rez-pipelines.txt" \
+		"$(STAGE_DIR)/rez/screenshot.png" \
 		"$(NEXTUI_GAMEDIR)/"
 	$(ADB) push "$(STAGE_DIR)/rez/tools/patchscript" "$(STAGE_DIR)/rez/tools/rez-patch" "$(NEXTUI_GAMEDIR)/tools/"
 	$(ADB) push \
@@ -51,10 +52,10 @@ push:
 		"$(STAGE_DIR)/rez/licenses/tomlplusplus-MIT.txt" \
 		"$(NEXTUI_GAMEDIR)/licenses/"
 	@echo "==> Cleaning previous unpacked binary so PortMaster patcher runs on boot..."
-	$(ADB) shell 'rm -f "$(NEXTUI_GAMEDIR)/rez" "$(NEXTUI_GAMEDIR)/extracted/fs/1ST_READ.BIN" && rmdir "$(NEXTUI_GAMEDIR)/disc" 2>/dev/null || true; sync'
+	$(ADB) shell 'rm -f "$(NEXTUI_GAMEDIR)/rez" "$(NEXTUI_GAMEDIR)/rez.aarch64" "$(NEXTUI_GAMEDIR)/extracted/fs/1ST_READ.BIN" && rmdir "$(NEXTUI_GAMEDIR)/disc" 2>/dev/null || true; sync'
 	@echo "==> Done! Launch Rez on your NextUI device to run the PortMaster patcher."
 
-# Fast dev deploy: pushes the unpatched aarch64 binary directly as `rez` (skipping the 15s patcher)
+# Fast dev deploy: pushes the unpatched aarch64 binary directly as `rez.aarch64` (skipping the 15s patcher)
 # while preserving gamedata/*.chd, conf/, and vmu/.
 push-fast:
 	@$(ADB) get-state >/dev/null
@@ -62,17 +63,18 @@ push-fast:
 	$(ADB) push "portmaster/Rez.sh" "$(NEXTUI_PORTS_DIR)/Rez.sh"
 	$(ADB) push "portmaster/Rez.sh" "$(NEXTUI_DOTPORTS_DIR)/Rez.sh"
 	@echo "==> Pushing unpatched aarch64 binary and assets directly to $(NEXTUI_GAMEDIR)/..."
-	$(ADB) shell 'mkdir -p "$(NEXTUI_GAMEDIR)/tools" "$(NEXTUI_GAMEDIR)/licenses" "$(NEXTUI_GAMEDIR)/gamedata"'
-	$(ADB) push "build/target/game/rez-recomp" "$(NEXTUI_GAMEDIR)/rez"
+	$(ADB) shell 'mkdir -p "$(NEXTUI_GAMEDIR)/tools" "$(NEXTUI_GAMEDIR)/licenses" "$(NEXTUI_GAMEDIR)/gamedata" "$(NEXTUI_GAMEDIR)/conf/rez_recompiled" "$(NEXTUI_GAMEDIR)/libs.aarch64"'
+	$(ADB) push "build/target/game/rez-recomp" "$(NEXTUI_GAMEDIR)/rez.aarch64"
 	$(ADB) push \
 		"portmaster/rez/README.md" \
 		"portmaster/rez/gameinfo.xml" \
 		"portmaster/rez/port.json" \
+		"portmaster/rez/screenshot.png" \
 		"game/rez.toml" \
 		"game/rez-pipelines.txt" \
 		"$(NEXTUI_GAMEDIR)/"
 	$(ADB) push "portmaster/rez/tools/patchscript" "build/target/engine/runtime/rez-patch" "$(NEXTUI_GAMEDIR)/tools/"
-	$(ADB) shell 'rm -f "$(NEXTUI_GAMEDIR)/rez.patch" && rmdir "$(NEXTUI_GAMEDIR)/disc" 2>/dev/null || true; sync'
+	$(ADB) shell 'rm -f "$(NEXTUI_GAMEDIR)/rez" "$(NEXTUI_GAMEDIR)/rez.patch" && rmdir "$(NEXTUI_GAMEDIR)/disc" 2>/dev/null || true; sync'
 	@echo "==> Done! Launch Rez on your NextUI device."
 
 logs:

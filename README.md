@@ -8,7 +8,7 @@ Forked from [phobos665/recomp-dreamcast-rez](https://github.com/phobos665/recomp
 
 - **Static SH-4 Recompilation**: Translates the original Dreamcast binaries (`1ST_READ.BIN` and stage overlays) ahead-of-time into native C++ with no CPU interpreter or JIT overhead.
 - **Unified OpenGL ES 3.0 Renderer**: Built for embedded handheld GPUs across **Mali-G31 MP2** (Anbernic H700 family), **PowerVR GE8300** (TrimUI Brick / Smart Pro), **Mali-G52** (RK3566), and **Adreno**, with no Vulkan requirement.
-- **Clean Room / Disc-Keyed Packaging**: Release packages (`rez.zip`) ship zero Dreamcast executable bytes. On first launch, PortMaster's built-in patcher (`patcher.txt`) verifies the user's `.chd` disc image, extracts `1ST_READ.BIN`, and reconstructs the `rez` executable in ~15 seconds.
+- **Clean Room / Disc-Keyed Packaging**: Release packages (`rez.zip`) ship zero Dreamcast executable bytes. On first launch, PortMaster's built-in patcher (`patcher.txt`) verifies the user's `.chd` disc image, extracts `1ST_READ.BIN`, and reconstructs the `rez.aarch64` executable in ~15 seconds.
 - **In-Game Recomp Settings (`Options -> Recomp Settings`)**:
   - **Aspect Ratio**: `4:3`, `3:2`, `16:9` (`Hor+` widescreen FOV), and `1:1` (`Vert+` square handheld FOV), with automatic 2D HUD and pause-menu un-stretching and first-boot screen auto-detection.
   - **Resolution Ladders**: Native handheld resolutions plus sub-native performance step-downs for each aspect ratio:
@@ -38,18 +38,19 @@ You must supply your own Dreamcast **Rez** (V1.003) `.chd` disc image:
 
 | Action | Handheld Control | Desktop Keyboard |
 |---|---|---|
-| **Targeting** | D-Pad / Left Stick | Arrow Keys / WASD |
-| **Lock-on / Shoot** | A / B | Space / Z / Enter |
-| **Overdrive** | L1 / L2 / R1 / R2 | X / Left Shift |
-| **Camera View** | X / Y | C / V |
+| **Targeting / Menus** | D-Pad / Left Stick | Arrow Keys / WASD |
+| **Lock-on / Shoot / Confirm** | A / X | Space / Z / Enter |
+| **Overdrive / Cancel** | B | X / Left Shift |
 | **Pause / Menu** | Start | Escape / Return |
+| **Controller Bindings** | Select | F1 |
+| **Toggle FPS Counter** | `Select + Y` | F3 |
 | **Exit Game** | `Menu + Start` or `Select + Start` | `Alt + F4` |
 
 ## Configuration & Save Data
 
 - **In-Game Display & FPS Settings**: Persisted automatically to `ports/rez/conf/rez_recompiled/settings.ini`.
 - **Controller Bindings**: Customizable in `ports/rez/conf/rez_recompiled/bindings.txt`.
-- **VMU Save Data**: Stored in `ports/rez/vmu/vmu_save_A1.bin`.
+- **VMU Save Data**: Stored in `ports/rez/conf/rez_recompiled/vmu_a1.bin`.
 
 ## Building from Source
 

@@ -1,0 +1,41 @@
+Instructions to install the Testing Zip:
+Drop the .zip into your Portmaster autoinstall folder and run Portmaster.
+or
+run via ssh: harbourmaster install "zip url from discord"
+
+Game Information
+Title: Rez
+URL: https://github.com/Pobega/rez-portmaster
+
+Instructions:
+Convert your Japanese (HDR-0178) or European (MK-5119250) Dreamcast Rez V1.003 disc to .chd and copy it to ports/rez/gamedata/. First launch takes about 15 seconds to verify the disc and build the executable.
+
+| Button | Action |
+|--|--|
+|DPAD| Move Reticle / Navigate Menus |
+|Left Analog| Move Reticle |
+|A| Lock-on / Shoot / Confirm |
+|B| Overdrive / Cancel |
+|X| Lock-on / Shoot |
+|Start| Pause / In-Game Menu |
+|Select| Controller Bindings Menu |
+|Select + Y| Toggle FPS Counter |
+|Select + Start| Exit Game |
+
+CFW Tests:
+[ ] AmberELEC
+[ ] dArkOS
+[ ] MuOS
+ROCKNIX
+-> [ ] Libmali
+-> [ ] Panfrost
+-> [ ] Adreno (Optional)
+[ ] Knulli
+[x] NextUI (RGSP, TrimUI Brick)
+
+Resolutions:
+[ ] 480x320 (Optional)
+[ ] 640x480
+[x] 720x480 (RGSP)
+[ ] 720x720 (RGB30) (Optional)
+[x] Higher resolutions (e.g., 1280) (Tested 1024x768 on TrimUI Brick)
