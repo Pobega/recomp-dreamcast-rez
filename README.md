@@ -34,6 +34,8 @@ You must supply your own Dreamcast **Rez** (V1.003) `.chd` disc image:
 |---|---|---|---|
 | **Japan** | `HDR-0178` | `V1.003` | `9711a0d0c21af3685672b9a42c72abf999fc7150` |
 | **Europe** | `MK-5119250` | `V1.003` | `01b7c1cc29a840b141a4ae713037eb1224fac233` |
+| **Europe** | `MK-5119250` | `V1.003` | `b02e62788394f59c34fcd07d19a7dd80b47fb76e` |
+| **Europe** | `MK-5119250` | `V1.003` | `66bfa7cf95348746f61e36a50c77050d380ca3aa` |
 
 ## Installing on PortMaster
 

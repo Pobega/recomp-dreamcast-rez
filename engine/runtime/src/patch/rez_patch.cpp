@@ -16,7 +16,19 @@ namespace {
 
 constexpr const char* kExpectedBootSha1 = "62f27393c3170001dc987f3ae836461bd63dbd7a";
 constexpr const char* kExpectedJpChdSha1 = "9711a0d0c21af3685672b9a42c72abf999fc7150";
-constexpr const char* kExpectedEuChdSha1 = "01b7c1cc29a840b141a4ae713037eb1224fac233";
+constexpr const char* kExpectedEuChdSha1s[] = {
+    "01b7c1cc29a840b141a4ae713037eb1224fac233",
+    "b02e62788394f59c34fcd07d19a7dd80b47fb76e",
+    "66bfa7cf95348746f61e36a50c77050d380ca3aa",
+};
+
+bool is_expected_eu_chd_sha1(std::string_view sha1) {
+    for (const char* expected : kExpectedEuChdSha1s) {
+        if (sha1 == expected)
+            return true;
+    }
+    return false;
+}
 
 constexpr std::size_t kChunkBytes = 65536;
 constexpr std::uint64_t kInitialCipherState = 0x62f27393c3170001ULL;
@@ -66,10 +78,11 @@ int handle_extract_verify(const std::filesystem::path& chd_path,
         return 1;
     }
 
-    if (chd_sha1 != kExpectedJpChdSha1 && chd_sha1 != kExpectedEuChdSha1) {
+    if (chd_sha1 != kExpectedJpChdSha1 && !is_expected_eu_chd_sha1(chd_sha1)) {
         std::cerr << "rez-patch: unsupported disc image SHA-1: " << chd_sha1 << "\n"
                   << "  Expected Japanese (" << kExpectedJpChdSha1 << ")\n"
-                  << "  or European (" << kExpectedEuChdSha1 << ")\n";
+                  << "  or European (" << kExpectedEuChdSha1s[0] << ", "
+                  << kExpectedEuChdSha1s[1] << ", or " << kExpectedEuChdSha1s[2] << ")\n";
         return 1;
     }
 

@@ -9,10 +9,13 @@ product = "HDR-0178"
 [disc]
 sha1_1st_read = "62f27393c3170001dc987f3ae836461bd63dbd7a"   # SHA-1 of the boot file
 
-# The supported disc images: CHDs of the Japanese and European releases, by the SHA-1 each
-# CHD's header records. Both carry the boot file above; the European one differs only in data the
-# game reads at run time. dc.py setup and the game refuse any other image, including a GDI or
-# BIN/CUE of the same disc.
+# The supported disc images: CHDs of the Japanese and European releases, by the SHA-1 each CHD's
+# header records. All carry the boot file above; the European one differs only in data the game
+# reads at run time. The European disc comes as three CHDs: the last two hold the same track 1 and
+# the same track 3 (the whole high-density area, every file in it) and differ only in where
+# track 2, the audio warning, starts (LBA 846 or 996, its 150-sector pregap counted in track 2 or
+# not), which changes the header's SHA-1 and nothing the game reads. dc.py setup and the game
+# refuse any other image, including a GDI or BIN/CUE of the same disc.
 [[disc.chd]]
 sha1 = "9711a0d0c21af3685672b9a42c72abf999fc7150"
 name = "Rez (Japan) (En,Ja,Fr,De,Es,It)"
@@ -21,6 +24,16 @@ label = "Japanese"
 [[disc.chd]]
 sha1 = "01b7c1cc29a840b141a4ae713037eb1224fac233"
 name = "Rez (Europe) (En,Ja,Fr,De,Es,It)"
+label = "European"
+
+[[disc.chd]]
+sha1 = "b02e62788394f59c34fcd07d19a7dd80b47fb76e"
+name = "Rez (Europe) (En,Ja,Fr,De,Es,It)"
+label = "European"
+
+[[disc.chd]]
+sha1 = "66bfa7cf95348746f61e36a50c77050d380ca3aa"
+name = "Rez v1.003 (2001)(Sega)(PAL)(M6)[!]"
 label = "European"
 
 [binary]
