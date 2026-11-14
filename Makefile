@@ -42,6 +42,7 @@ push:
 		"$(STAGE_DIR)/rez/rez.toml" \
 		"$(STAGE_DIR)/rez/rez-pipelines.txt" \
 		"$(STAGE_DIR)/rez/screenshot.png" \
+		"$(STAGE_DIR)/rez/cover.png" \
 		"$(NEXTUI_GAMEDIR)/"
 	$(ADB) push "$(STAGE_DIR)/rez/tools/patchscript" "$(STAGE_DIR)/rez/tools/rez-patch" "$(NEXTUI_GAMEDIR)/tools/"
 	$(ADB) push \

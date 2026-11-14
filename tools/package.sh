@@ -56,6 +56,7 @@ cp portmaster/rez/README.md "$PKG/rez/README.md"
 [ -f portmaster/rez/testing_thread.txt ] && cp portmaster/rez/testing_thread.txt "$PKG/rez/testing_thread.txt"
 [ -f portmaster/rez/gameinfo.xml ] && cp portmaster/rez/gameinfo.xml "$PKG/rez/gameinfo.xml"
 [ -f portmaster/rez/screenshot.png ] && cp portmaster/rez/screenshot.png "$PKG/rez/screenshot.png"
+[ -f portmaster/rez/cover.png ] && cp portmaster/rez/cover.png "$PKG/rez/cover.png"
 
 cp LICENSE "$PKG/rez/licenses/rez-recomp-GPL-2.0.txt"
 cp THIRD_PARTY_NOTICES.md "$PKG/rez/licenses/THIRD_PARTY_NOTICES.md"
