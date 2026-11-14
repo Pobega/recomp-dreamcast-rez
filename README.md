@@ -4,6 +4,14 @@ A static C++ recompilation of **Rez** (Sega Dreamcast, 2001) tailored for **Port
 
 Forked from [phobos665/recomp-dreamcast-rez](https://github.com/phobos665/recomp-dreamcast-rez), this port replaces the desktop Vulkan renderer with a lightweight **OpenGL ES 3.0** rendering pipeline, adds multi-aspect handheld display ladders, and integrates PortMaster's first-boot disc verification and patching workflow.
 
+## Screenshots
+
+| Title Screen (`16:9` Widescreen) | Area 1 Gameplay (`16:9` Widescreen) |
+| :---: | :---: |
+| ![Title Screen (16:9)](docs/screenshots/title_16x9.png) | ![Area 1 Gameplay (16:9)](docs/screenshots/gameplay_16x9.png) |
+| **Area Select (`3:2` Handheld)** | **In-Game Recomp Settings (`3:2` Handheld)** |
+| ![Area Select (3:2)](docs/screenshots/area_select_3x2.png) | ![Recomp Settings (3:2)](docs/screenshots/recomp_settings_3x2.png) |
+
 ## Highlights
 
 - **Static SH-4 Recompilation**: Translates the original Dreamcast binaries (`1ST_READ.BIN` and stage overlays) ahead-of-time into native C++ with no CPU interpreter or JIT overhead.
